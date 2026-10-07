@@ -29,13 +29,23 @@ Host:
 make test
 ```
 
-Amiga target:
+Amiga static target:
 
 ```sh
 ./build-amiga.sh
 ```
 
-The Amiga build uses the AmigaChrome os32-gcc16 stove by default.
+Resident Amiga library and ABI test:
+
+```sh
+./build-library.sh
+```
+
+The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup.
+
+The first OS 3.2.3 / AC090 68040 guest qualification opened the library from `LIBS:` and passed document creation, layout, display-list access, semantic lookup, geometry and actionable-link hit testing.
+
+The Amiga builds use the AmigaChrome os32-gcc16 stove by default.
 
 ## Geometry
 

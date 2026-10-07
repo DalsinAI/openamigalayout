@@ -1,0 +1,35 @@
+==id $Id: openlayout_lib.sfd 1.0 (7.10.2026) $
+* "openlayout.library"
+==base _OpenLayoutBase
+==basetype struct Library *
+==libname openlayout.library
+==bias 30
+==public
+==include <exec/types.h>
+==include <libraries/openlayout.h>
+ULONG OL_Version()()
+CONST_STRPTR OL_VersionString()()
+ol_document *OL_DocumentNew()()
+VOID OL_DocumentFree(ol_document *doc)(a0)
+ol_node *OL_DocumentRoot(ol_document *doc)(a0)
+ol_node *OL_NodeAppend(struct OLNodeAppend *req)(a0)
+ULONG OL_NodeID(const ol_node *node)(a0)
+BOOL OL_NodeSetText(struct OLNodeString *req)(a0)
+BOOL OL_NodeSetName(struct OLNodeString *req)(a0)
+BOOL OL_NodeSetValue(struct OLNodeString *req)(a0)
+BOOL OL_NodeSetHref(struct OLNodeString *req)(a0)
+VOID OL_NodeSetStyle(struct OLNodeStyle *req)(a0)
+VOID OL_NodeSetActions(ol_node *node, ULONG actions)(a0,d0)
+ULONG OL_NodeActions(const ol_node *node)(a0)
+VOID OL_NodeSetImage(struct OLNodeImage *req)(a0)
+CONST_STRPTR OL_NodeHref(const ol_node *node)(a0)
+BOOL OL_NodeBounds(struct OLNodeBounds *req)(a0)
+const ol_node *OL_FindRoleName(struct OLFindRoleName *req)(a0)
+const ol_node *OL_HitAction(struct OLHitAction *req)(a0)
+BOOL OL_Layout(struct OLLayoutRequest *req)(a0)
+LONG OL_DocumentContentHeight(const ol_document *doc)(a0)
+ULONG OL_DocumentGeneration(const ol_document *doc)(a0)
+ULONG OL_DisplayCount(const ol_document *doc)(a0)
+const ol_display_op *OL_DisplayGet(const ol_document *doc, ULONG index)(a0,d0)
+VOID OL_StyleInit(ol_style *style)(a0)
+==end
