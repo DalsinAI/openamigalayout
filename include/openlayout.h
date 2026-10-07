@@ -197,9 +197,12 @@ uint32_t ol_node_states(const ol_node *node);
 void ol_node_set_image(ol_node *node, int image_id, ol_unit width, ol_unit height);
 
 const ol_node *ol_node_by_id(const ol_document *doc, ol_id id);
+const ol_node *ol_node_parent(const ol_node *node);
 const ol_node *ol_find_role_name(const ol_document *doc, ol_role role,
                                  const char *name);
 const ol_node *ol_hit_test(const ol_document *doc, ol_unit x, ol_unit y);
+const ol_node *ol_hit_action(const ol_document *doc, ol_unit x, ol_unit y,
+                             uint32_t action);
 
 int ol_layout(ol_document *doc, ol_unit viewport_width,
               ol_measure_text_fn measure, void *measure_userdata);

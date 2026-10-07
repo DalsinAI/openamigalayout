@@ -127,6 +127,9 @@ int main(void)
     hit = ol_hit_test(doc, link_box.x + 1, link_box.y + 1);
     CHECK(hit != NULL);
     CHECK(ol_node_id(hit) == link_id);
+    hit = ol_hit_action(doc, link_box.x + 1, link_box.y + 1, OL_ACTION_ACTIVATE);
+    CHECK(hit != NULL);
+    CHECK(ol_node_id(hit) == link_id);
 
     CHECK(ol_layout(doc, OL_CSSPX(180), measure, NULL));
     CHECK(ol_document_generation(doc) == 2);

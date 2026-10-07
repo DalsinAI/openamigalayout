@@ -341,6 +341,11 @@ const ol_node *ol_node_by_id(const ol_document *doc, ol_id id)
     return NULL;
 }
 
+const ol_node *ol_node_parent(const ol_node *node)
+{
+    return node ? node->parent : NULL;
+}
+
 const ol_node *ol_find_role_name(const ol_document *doc, ol_role role,
                                  const char *name)
 {
@@ -372,6 +377,17 @@ const ol_node *ol_hit_test(const ol_document *doc, ol_unit x, ol_unit y)
         }
     }
     return best;
+}
+
+const ol_node *ol_hit_action(const ol_document *doc, ol_unit x, ol_unit y,
+                             uint32_t action)
+{
+    const ol_node *node = ol_hit_test(doc, x, y);
+    while (node) {
+        if (node->actions & action) return node;
+        node = node->parent;
+    }
+    return NULL;
 }
 
 static int default_measure(const char *utf8, size_t length,
