@@ -102,6 +102,10 @@ int main(void)
     hit = OL_HitAction(&hit_req);
     CHECK(hit != NULL);
     CHECK(OL_NodeID(hit) == OL_NodeID(link));
+    CHECK(OL_NodeByID(doc, OL_NodeID(link)) == link);
+    CHECK(OL_NodeRole(link) == OL_ROLE_LINK);
+    CHECK(!strcmp((const char *)OL_NodeText(link), "this link"));
+    CHECK(!strcmp((const char *)OL_NodeName(link), "example-link"));
 
     printf("LAYOUTLIB PASS version=%s height=%ld ops=%lu link=%lu\n",
            (const char *)OL_VersionString(),

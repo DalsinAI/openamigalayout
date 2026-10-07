@@ -1,4 +1,4 @@
-/* openlayout.library 1.0
+/* openlayout.library 2.0
  * Copyright (c) 2026 Dalsin Limited. MIT.
  */
 #include <exec/types.h>
@@ -12,7 +12,7 @@
 #include "../include/libraries/openlayout.h"
 
 #define REG(r, decl) register decl __asm(#r)
-#define LIB_VERSION 1
+#define LIB_VERSION 2
 #define LIB_REVISION 0
 
 struct OpenLayoutLibBase {
@@ -26,7 +26,7 @@ int start(void) { return -1; }
 
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
-    "openlayout.library 1.0 (7.10.2026) OpenLayout 0.1, Dalsin Limited\r\n";
+    "openlayout.library 2.0 (7.10.2026) OpenLayout 0.1, Dalsin Limited\r\n";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),
@@ -61,6 +61,11 @@ static ULONG OL_DocumentGeneration(REG(a0, const ol_document *doc), REG(a6, stru
 static ULONG OL_DisplayCount(REG(a0, const ol_document *doc), REG(a6, struct OpenLayoutLibBase *base));
 static const ol_display_op *OL_DisplayGet(REG(a0, const ol_document *doc), REG(d0, ULONG index), REG(a6, struct OpenLayoutLibBase *base));
 static void OL_StyleInit(REG(a0, ol_style *style), REG(a6, struct OpenLayoutLibBase *base));
+static const ol_node *OL_NodeByID(REG(a0, const ol_document *doc), REG(d0, ULONG id), REG(a6, struct OpenLayoutLibBase *base));
+static ULONG OL_NodeRole(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
+static CONST_STRPTR OL_NodeText(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
+static CONST_STRPTR OL_NodeName(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
+static CONST_STRPTR OL_NodeValue(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
 
 static const APTR lib_vectors[] = {
     (APTR)lib_open, (APTR)lib_close, (APTR)lib_expunge, (APTR)lib_null,
@@ -73,7 +78,8 @@ static const APTR lib_vectors[] = {
     (APTR)OL_NodeBounds, (APTR)OL_FindRoleName, (APTR)OL_HitAction,
     (APTR)OL_Layout, (APTR)OL_DocumentContentHeight,
     (APTR)OL_DocumentGeneration, (APTR)OL_DisplayCount, (APTR)OL_DisplayGet,
-    (APTR)OL_StyleInit,
+    (APTR)OL_StyleInit, (APTR)OL_NodeByID, (APTR)OL_NodeRole,
+    (APTR)OL_NodeText, (APTR)OL_NodeName, (APTR)OL_NodeValue,
     (APTR)-1
 };
 
@@ -288,4 +294,34 @@ static void OL_StyleInit(REG(a0, ol_style *style), REG(a6, struct OpenLayoutLibB
 {
     (void)base;
     ol_style_init(style);
+}
+
+static const ol_node *OL_NodeByID(REG(a0, const ol_document *doc), REG(d0, ULONG id), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return ol_node_by_id(doc, (ol_id)id);
+}
+
+static ULONG OL_NodeRole(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return (ULONG)ol_node_role(node);
+}
+
+static CONST_STRPTR OL_NodeText(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return (CONST_STRPTR)ol_node_text(node);
+}
+
+static CONST_STRPTR OL_NodeName(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return (CONST_STRPTR)ol_node_name(node);
+}
+
+static CONST_STRPTR OL_NodeValue(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return (CONST_STRPTR)ol_node_value(node);
 }

@@ -23,5 +23,8 @@ echo "$OUT/lib/openlayout.library ($(wc -c < "$OUT/lib/openlayout.library") byte
 
 "$CC" -m68040 -m68881 -O2 -Wall -Wextra -Werror -noixemul \
   -I"$HERE/include" -o "$OUT/tests/LayoutLibTest" "$HERE/tests/test_library.c"
+"$CC" -m68040 -m68881 -O2 -Wall -Wextra -Werror -noixemul \
+  -I"$HERE/include" -o "$OUT/tests/LayoutLibStress" "$HERE/tests/test_library_stress.c"
 echo "$OUT/tests/LayoutLibTest ($(wc -c < "$OUT/tests/LayoutLibTest") bytes)"
-sha256sum "$OUT/lib/openlayout.library" "$OUT/tests/LayoutLibTest"
+echo "$OUT/tests/LayoutLibStress ($(wc -c < "$OUT/tests/LayoutLibStress") bytes)"
+sha256sum "$OUT/lib/openlayout.library" "$OUT/tests/LayoutLibTest" "$OUT/tests/LayoutLibStress"

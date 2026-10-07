@@ -32,5 +32,10 @@
 #define OL_DisplayCount(doc) LP1(0xa2, ULONG, OL_DisplayCount, const ol_document *, doc, a0, , OPENLAYOUT_BASE_NAME)
 #define OL_DisplayGet(doc,index) LP2(0xa8, const ol_display_op *, OL_DisplayGet, const ol_document *, doc, a0, ULONG, index, d0, , OPENLAYOUT_BASE_NAME)
 #define OL_StyleInit(style) LP1NR(0xae, OL_StyleInit, ol_style *, style, a0, , OPENLAYOUT_BASE_NAME)
+#define OL_NodeByID(doc,id) LP2(0xb4, const ol_node *, OL_NodeByID, const ol_document *, doc, a0, ULONG, id, d0, , OPENLAYOUT_BASE_NAME)
+#define OL_NodeRole(node) LP1(0xba, ULONG, OL_NodeRole, const ol_node *, node, a0, , OPENLAYOUT_BASE_NAME)
+#define OL_NodeText(node) LP1(0xc0, CONST_STRPTR, OL_NodeText, const ol_node *, node, a0, , OPENLAYOUT_BASE_NAME)
+#define OL_NodeName(node) LP1(0xc6, CONST_STRPTR, OL_NodeName, const ol_node *, node, a0, , OPENLAYOUT_BASE_NAME)
+#define OL_NodeValue(node) LP1(0xcc, CONST_STRPTR, OL_NodeValue, const ol_node *, node, a0, , OPENLAYOUT_BASE_NAME)
 
 #endif

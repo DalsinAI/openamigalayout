@@ -5,7 +5,7 @@
 #include <openlayout.h>
 
 #define OPENLAYOUTLIB_NAME "openlayout.library"
-#define OPENLAYOUTLIB_VERSION 1
+#define OPENLAYOUTLIB_VERSION 2
 #define OPENLAYOUTLIB_REVISION 0
 
 struct OLNodeAppend {
