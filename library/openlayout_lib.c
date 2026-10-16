@@ -1,5 +1,5 @@
 /* openlayout.library 2.0
- * Copyright (c) 2026 Dalsin Limited. MIT.
+ * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
 #include <exec/types.h>
 #include <exec/resident.h>
@@ -26,7 +26,7 @@ int start(void) { return -1; }
 
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
-    "openlayout.library 2.0 (7.10.2026) OpenLayout 0.1, Dalsin Limited\r\n";
+    "openlayout.library 2.0 (7.10.2026) OpenLayout 0.1, AmigaChrome Team\r\n";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),
