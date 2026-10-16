@@ -58,4 +58,4 @@ See `DESIGN.md` and `docs/LIGHTWEIGHT_BROWSER.md`.
 
 ## Licence
 
-MIT. Copyright (c) 2026 Dalsin Limited.
+MIT. Copyright (c) 2026 AmigaChrome Team.

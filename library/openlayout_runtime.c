@@ -1,5 +1,5 @@
 /* Minimal process-free runtime for resident openlayout.library.
- * Copyright (c) 2026 Dalsin Limited. MIT.
+ * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
 #include <exec/types.h>
 #include <exec/memory.h>
