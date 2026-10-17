@@ -19,7 +19,7 @@ The 0.1 foundation includes:
 - role/name lookup;
 - hit testing;
 - headless host tests;
-- AmigaOS 3.x 68040 + FPU cross-build.
+- AmigaOS 3.x 68040 + FPU cross-build: it needs a 68040 with an FPU (a full 68040, not an LC or EC040). The browser stack stays hard float for now.
 
 ## Build and test
 
