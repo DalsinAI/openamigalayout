@@ -29,6 +29,8 @@ struct ol_node {
     ol_box_style box;
     ol_unit *columns;
     int column_count;
+    ol_unit *tabs;
+    int tab_count;
 };
 
 /* A stretch of the galley a page may not end inside: a line, a table row,
@@ -79,6 +81,8 @@ typedef struct {
 
     ol_unit x0;
     ol_unit right;
+    const ol_unit *tabs;      /* the block's tab stops, from x0 */
+    int tab_count;
     ol_unit cursor_x;
     ol_unit line_top;
     ol_unit line_height;      /* the tallest style line height or picture */
@@ -248,6 +252,7 @@ static void free_node(ol_node *node)
     free(node->value);
     free(node->href);
     free(node->columns);
+    free(node->tabs);
     free(node);
 }
 
@@ -417,6 +422,26 @@ int ol_node_set_columns(ol_node *node, int count, const ol_unit *widths)
     return 1;
 }
 
+int ol_node_set_tabs(ol_node *node, int count, const ol_unit *stops)
+{
+    ol_unit *copy = NULL;
+    int i, j;
+    if (!node || count < 0 || count > OL_MAX_TABS || (count && !stops)) return 0;
+    if (count) {
+        copy = (ol_unit *)malloc((size_t)count * sizeof(*copy));
+        if (!copy) return 0;
+        for (i = 0; i < count; ++i) {             /* in order, left to right */
+            ol_unit v = stops[i];
+            for (j = i; j > 0 && copy[j - 1] > v; --j) copy[j] = copy[j - 1];
+            copy[j] = v;
+        }
+    }
+    free(node->tabs);
+    node->tabs = copy;
+    node->tab_count = count;
+    return 1;
+}
+
 /* Node ids are given out in order and nodes are never removed, so a node's
  * id is its place in the list plus one. */
 static ol_node *node_for_id(const ol_document *doc, ol_id id)
@@ -544,6 +569,15 @@ static int is_space(char c)
     return c == ' ' || c == '\t';
 }
 
+/* A tab, which is a piece of its own. */
+static int op_is_tab(const ol_document *doc, const ol_display_op *op)
+{
+    const ol_node *n;
+    if (op->type != OL_OP_TEXT || op->u.text.text_length != 1) return 0;
+    n = node_for_id(doc, op->u.text.node_id);
+    return n && n->text && n->text[op->u.text.text_offset] == '\t';
+}
+
 /* Where justification may widen a line: after a piece ending in a space. */
 static int op_ends_in_space(const ol_document *doc, const ol_display_op *op)
 {
@@ -586,13 +620,17 @@ static int finish_line(ol_inline_flow *flow, int last)
             for (i = first; i < end; ++i) shift_op_x(&doc->ops[i], dx);
         } else if (flow->align == OL_ALIGN_JUSTIFY && !last) {
             ol_unit gaps = 0, seen = 0, share, rest;
-            for (i = first; i + 1 < end; ++i)
+            size_t from;
+            /* what is before a tab stays where the tab put it */
+            for (from = end; from > first; --from)
+                if (op_is_tab(doc, &doc->ops[from - 1])) break;
+            for (i = from; i + 1 < end; ++i)
                 if (op_ends_in_space(doc, &doc->ops[i])) ++gaps;
             /* each gap's share, the remainder spread over the first ones:
              * 32 bit divisions, which a 68040 does itself */
             share = gaps ? extra / gaps : 0;
             rest = gaps ? extra % gaps : 0;
-            for (i = first; gaps && i < end; ++i) {
+            for (i = from; gaps && i < end; ++i) {
                 shift_op_x(&doc->ops[i], share * seen + (seen < rest ? seen : rest));
                 if (i + 1 < end && op_ends_in_space(doc, &doc->ops[i])) ++seen;
             }
@@ -613,7 +651,8 @@ static int finish_line(ol_inline_flow *flow, int last)
     return add_keep(doc, flow->line_top, flow->line_top + height);
 }
 
-static void start_flow(ol_inline_flow *flow, ol_document *doc,
+/* block: the block whose text it is, for its tab stops; NULL for none */
+static void start_flow(ol_inline_flow *flow, ol_document *doc, const ol_node *block,
                        ol_measure_text_fn measure, void *measure_userdata,
                        ol_unit x0, ol_unit right, ol_unit top,
                        ol_text_align align, ol_unit indent)
@@ -624,6 +663,10 @@ static void start_flow(ol_inline_flow *flow, ol_document *doc,
     flow->measure_userdata = measure_userdata;
     flow->x0 = x0;
     flow->right = right;
+    if (block) {
+        flow->tabs = block->tabs;
+        flow->tab_count = block->tab_count;
+    }
     flow->cursor_x = x0 + indent;
     flow->content_right = flow->cursor_x;
     flow->line_top = top;
@@ -698,6 +741,48 @@ static int emit_text_piece(ol_inline_flow *flow, ol_node *node,
     return 1;
 }
 
+/* The next tab stop after the flow's x: the block's own, the left edge for
+ * a first line that hangs, then every OL_TAB_INTERVAL from the left edge. */
+static ol_unit next_tab(const ol_inline_flow *flow)
+{
+    ol_unit at = flow->cursor_x - flow->x0;
+    int i;
+    for (i = 0; i < flow->tab_count; ++i)
+        if (flow->tabs[i] > at)
+            return flow->x0 + (at < 0 && flow->tabs[i] > 0 ? 0 : flow->tabs[i]);
+    if (at < 0) return flow->x0;
+    return flow->x0 + (at / OL_TAB_INTERVAL + 1) * OL_TAB_INTERVAL;
+}
+
+/* A tab: a piece to the next stop, or, when that is past the line's end,
+ * the next line's first; it holds its place at a line's start too. */
+static int emit_tab(ol_inline_flow *flow, ol_node *node, size_t offset)
+{
+    ol_display_op *op;
+    ol_unit to = next_tab(flow);
+    if (to > flow->right && flow->has_content) {
+        if (!flow_newline(flow, 0)) return 0;
+        to = next_tab(flow);
+    }
+    if (to > flow->right) to = flow->right > flow->cursor_x ? flow->right : flow->cursor_x;
+
+    op = append_op(flow->doc, OL_OP_TEXT);
+    if (!op) return 0;
+    op->u.text.node_id = node->id;
+    op->u.text.bounds.x = flow->cursor_x;
+    op->u.text.bounds.y = flow->line_top;
+    op->u.text.bounds.width = to - flow->cursor_x;
+    op->u.text.text_offset = offset;
+    op->u.text.text_length = 1;
+    op->u.text.style = node->style;
+
+    if (node->style.line_height > flow->line_height) flow->line_height = node->style.line_height;
+    flow->cursor_x = to;
+    flow->content_right = to;
+    flow->has_content = 1;
+    return 1;
+}
+
 static int layout_inline_node(ol_inline_flow *flow, ol_node *node);
 
 static int layout_inline_text(ol_inline_flow *flow, ol_node *node)
@@ -718,13 +803,19 @@ static int layout_inline_text(ol_inline_flow *flow, ol_node *node)
             continue;
         }
 
+        if (s[pos] == '\t') {
+            if (!emit_tab(flow, node, pos)) return 0;
+            ++pos;
+            continue;
+        }
+
         start = pos;
-        if (is_space(s[pos])) {
-            while (pos < len && is_space(s[pos])) ++pos;
+        if (s[pos] == ' ') {
+            while (pos < len && s[pos] == ' ') ++pos;
         } else {
             while (pos < len && !is_space(s[pos]) && s[pos] != '\r' && s[pos] != '\n')
                 ++pos;
-            while (pos < len && is_space(s[pos])) ++pos;
+            while (pos < len && s[pos] == ' ') ++pos;
         }
         if (!emit_text_piece(flow, node, start, pos - start)) return 0;
     }
@@ -995,7 +1086,7 @@ static int layout_block(ol_document *doc, ol_node *node,
     }
 
     current_y = empty_top = box_y + node->style.padding_top;
-    start_flow(&flow, doc, measure, measure_userdata, inner_x, inner_x + inner_w,
+    start_flow(&flow, doc, node, measure, measure_userdata, inner_x, inner_x + inner_w,
                current_y, node->style.text_align, node->box.text_indent);
 
     if (node->role == OL_ROLE_TABLE) {
@@ -1029,7 +1120,7 @@ static int layout_block(ol_document *doc, ol_node *node,
                     has_keep_with_next = 1;
                 }
                 current_y = child_bottom;
-                start_flow(&flow, doc, measure, measure_userdata, inner_x, inner_x + inner_w,
+                start_flow(&flow, doc, node, measure, measure_userdata, inner_x, inner_x + inner_w,
                            current_y, node->style.text_align, 0);
             }
         }
@@ -1085,7 +1176,7 @@ static int layout_galley(ol_document *doc, ol_unit width,
         if (child->style.display == OL_DISPLAY_NONE || is_frame(child)) continue;
         if (child->style.display == OL_DISPLAY_INLINE) {
             ol_inline_flow flow;
-            start_flow(&flow, doc, measure, measure_userdata, 0, width, y,
+            start_flow(&flow, doc, NULL, measure, measure_userdata, 0, width, y,
                        child->style.text_align, 0);
             if (!layout_inline_node(&flow, child)) return 0;
             if (!flush_flow(&flow, &y)) return 0;
@@ -1477,7 +1568,8 @@ int ol_hit_text(const ol_document *doc, int page, ol_unit x, ol_unit y,
         ol_text_metrics m;
         ol_unit edge, d;
         if (k < op->u.text.text_length && ((unsigned char)text[k] & 0xc0u) == 0x80u) continue;
-        if (!measure_with(measure, measure_userdata, text, k, &op->u.text.style, &m)) return 0;
+        if (op_is_tab(doc, op)) m.width = op->u.text.bounds.width;
+        else if (!measure_with(measure, measure_userdata, text, k, &op->u.text.style, &m)) return 0;
         edge = op->u.text.bounds.x + m.width;
         d = x > edge ? x - edge : edge - x;
         if (d < best_d) {
@@ -1518,8 +1610,10 @@ int ol_caret_box(const ol_document *doc, const ol_text_position *pos,
         ol_text_metrics m;
         size_t k = pos->offset - op->u.text.text_offset;
         m.width = 0;
-        if (k && !measure_with(measure, measure_userdata, node->text + op->u.text.text_offset,
-                               k, &op->u.text.style, &m))
+        if (k && op_is_tab(doc, op))
+            m.width = op->u.text.bounds.width;
+        else if (k && !measure_with(measure, measure_userdata, node->text + op->u.text.text_offset,
+                                    k, &op->u.text.style, &m))
             return 0;
         box->x = op->u.text.bounds.x + m.width;
         box->y = op->u.text.bounds.y;

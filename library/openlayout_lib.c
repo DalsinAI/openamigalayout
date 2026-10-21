@@ -86,6 +86,7 @@ static void OL_ScaleFit(REG(a0, ol_scale *scale), REG(d0, LONG length), REG(d1, 
 static LONG OL_UnscaleX(REG(a0, const ol_scale *scale), REG(d0, LONG px), REG(a6, struct OpenLayoutLibBase *base));
 static LONG OL_UnscaleY(REG(a0, const ol_scale *scale), REG(d0, LONG py), REG(a6, struct OpenLayoutLibBase *base));
 static ULONG OL_DrawPage(REG(a0, struct OLDrawPage *r), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_NodeSetTabs(REG(a0, struct OLNodeTabs *r), REG(a6, struct OpenLayoutLibBase *base));
 
 static const APTR lib_vectors[] = {
     (APTR)lib_open, (APTR)lib_close, (APTR)lib_expunge, (APTR)lib_null,
@@ -105,7 +106,7 @@ static const APTR lib_vectors[] = {
     (APTR)OL_LayoutPages, (APTR)OL_PageCount, (APTR)OL_DisplayPageRange,
     (APTR)OL_HitTestPage, (APTR)OL_HitText, (APTR)OL_CaretBox, (APTR)OL_NodeBox,
     (APTR)OL_ScaleSet, (APTR)OL_ScaleDPI, (APTR)OL_ScaleFit,
-    (APTR)OL_UnscaleX, (APTR)OL_UnscaleY, (APTR)OL_DrawPage,
+    (APTR)OL_UnscaleX, (APTR)OL_UnscaleY, (APTR)OL_DrawPage, (APTR)OL_NodeSetTabs,
     (APTR)-1
 };
 
@@ -460,4 +461,10 @@ static ULONG OL_DrawPage(REG(a0, struct OLDrawPage *r), REG(a6, struct OpenLayou
     (void)base;
     if (!r) return 0;
     return (ULONG)ol_draw_page(r->document, (int)r->page, r->scale, r->clip, r->draw, r->userdata);
+}
+
+static BOOL OL_NodeSetTabs(REG(a0, struct OLNodeTabs *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return r && ol_node_set_tabs(r->node, (int)r->count, r->stops) ? TRUE : FALSE;
 }

@@ -510,6 +510,108 @@ static void test_scale(void)
     ol_document_free(doc);
 }
 
+/* the first text op of a node */
+static const ol_display_op *first_op(const ol_document *doc, const ol_node *n)
+{
+    const ol_display_op *op[1];
+    return text_ops(doc, ol_node_id(n), op, 1) ? op[0] : NULL;
+}
+
+static void test_tabs(void)
+{
+    ol_document *doc = ol_document_new();
+    ol_node *list, *bullet, *tab, *item, *stops, *line, *lead, *lead_x, *just, *a, *bb, *gg;
+    ol_box_style box;
+    ol_style s;
+    ol_unit at[2];
+    ol_text_position pos;
+    ol_rect caret;
+    int pg = -1;
+    const ol_display_op *op;
+
+    /* a list item: the bullet hangs, its tab goes to the left edge, and the
+     * lines under it start there too */
+    list = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    s = *ol_node_style(list);
+    s.margin_left = OL_CSSPX(24);
+    ol_node_set_style(list, &s);
+    ol_box_style_init(&box);
+    box.text_indent = -OL_CSSPX(24);
+    ol_node_set_box(list, &box);
+    bullet = text(doc, list, "*", OL_CSSPX(16), 0);
+    tab = text(doc, list, "\t", OL_CSSPX(16), 0);
+    item = text(doc, list, "Libraries, devices and fonts are only noted", OL_CSSPX(16), 0);
+
+    /* stops given out of order, then the half inch ones after the last */
+    stops = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    at[0] = OL_CSSPX(100);
+    at[1] = OL_CSSPX(40);
+    CHECK(ol_node_set_tabs(stops, 2, at));
+    CHECK(!ol_node_set_tabs(stops, OL_MAX_TABS + 1, at));
+    line = text(doc, stops, "ab\tc\td\te", OL_CSSPX(16), 0);
+
+    /* a tab at a line's start is kept */
+    lead = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    lead_x = text(doc, lead, "\tx", OL_CSSPX(16), 0);
+
+    /* justification leaves what is before a tab where it is */
+    just = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_JUSTIFY);
+    a = text(doc, just, "a", OL_CSSPX(16), 0);
+    text(doc, just, "\t", OL_CSSPX(16), 0);
+    bb = text(doc, just, "bb cc dd ee ff ", OL_CSSPX(16), 0);
+    gg = text(doc, just, "gg hh ii", OL_CSSPX(16), 0);
+
+    CHECK(ol_layout(doc, OL_CSSPX(200), measure, NULL));
+
+    op = first_op(doc, bullet);
+    CHECK(op && op->u.text.bounds.x == 0);
+    op = first_op(doc, tab);
+    CHECK(op && op->u.text.bounds.x == OL_CSSPX(8) && op->u.text.bounds.width == OL_CSSPX(16));
+    {
+        const ol_display_op *ops[8];
+        size_t n = text_ops(doc, ol_node_id(item), ops, 8);
+        CHECK(n >= 2 && ops[0]->u.text.bounds.x == OL_CSSPX(24));
+        CHECK(n >= 2 && ops[n - 1]->u.text.bounds.y > ops[0]->u.text.bounds.y);
+        while (n > 1 && ops[n - 1]->u.text.bounds.y == ops[n - 2]->u.text.bounds.y) --n;
+        CHECK(n >= 2 && ops[n - 1]->u.text.bounds.x == OL_CSSPX(24));   /* the next line's first */
+    }
+
+    {
+        const ol_display_op *ops[8];
+        size_t n = text_ops(doc, ol_node_id(line), ops, 8);
+        CHECK(n == 7);
+        if (n == 7) {
+            CHECK(ops[0]->u.text.bounds.x == 0);                         /* ab */
+            CHECK(ops[2]->u.text.bounds.x == OL_CSSPX(40));              /* c */
+            CHECK(ops[4]->u.text.bounds.x == OL_CSSPX(100));             /* d */
+            CHECK(ops[6]->u.text.bounds.x == OL_CSSPX(144));             /* e: 3 x 48 */
+        }
+    }
+
+    {
+        const ol_display_op *ops[4];
+        size_t n = text_ops(doc, ol_node_id(lead_x), ops, 4);
+        CHECK(n == 2 && ops[0]->u.text.bounds.x == 0 && ops[1]->u.text.bounds.x == OL_CSSPX(48));
+    }
+
+    op = first_op(doc, a);
+    CHECK(op && op->u.text.bounds.x == 0);
+    op = first_op(doc, bb);
+    CHECK(op && op->u.text.bounds.x == OL_CSSPX(48));
+    {
+        const ol_display_op *ops[4];
+        size_t n = text_ops(doc, ol_node_id(gg), ops, 4);
+        CHECK(n == 3 && ops[0]->u.text.bounds.x + OL_CSSPX(16) == OL_CSSPX(200));
+    }
+
+    /* the caret after a tab is at the stop */
+    pos.node_id = ol_node_id(tab);
+    pos.offset = 1;
+    CHECK(ol_caret_box(doc, &pos, measure, NULL, &pg, &caret));
+    CHECK(caret.x == OL_CSSPX(24));
+    ol_document_free(doc);
+}
+
 int main(void)
 {
     test_alignment();
@@ -521,6 +623,7 @@ int main(void)
     test_editing();
     test_box_versions();
     test_scale();
+    test_tabs();
     if (failures) {
         printf("OPENLAYOUT DOCUMENT FAIL (%d)\n", failures);
         return 20;

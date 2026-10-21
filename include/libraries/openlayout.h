@@ -120,4 +120,10 @@ struct OLCaretBox {
     ol_rect *box;
 };
 
+struct OLNodeTabs {
+    ol_node *node;
+    LONG count;
+    const ol_unit *stops;
+};
+
 #endif

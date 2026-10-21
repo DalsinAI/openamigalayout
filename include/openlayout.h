@@ -274,6 +274,15 @@ const ol_box_style *ol_node_box(const ol_node *node);
 #define OL_MAX_COLUMNS 64
 int ol_node_set_columns(ol_node *node, int count, const ol_unit *widths);
 
+/* A block's tab stops (at most OL_MAX_TABS), from its left edge, left
+ * aligned. A tab in its text goes on to the next stop; past the last, to
+ * the next of every OL_TAB_INTERVAL from the left edge. A first line that
+ * hangs (text_indent below 0) stops at the left edge first, so a list's
+ * number and tab line its text up with the lines under it. */
+#define OL_MAX_TABS 32
+#define OL_TAB_INTERVAL (OL_UNITS_PER_INCH / 2)
+int ol_node_set_tabs(ol_node *node, int count, const ol_unit *stops);
+
 /* Pages. ol_layout_pages lays the document out at the page's width less
  * its margins, as a galley, then cuts the galley into pages: between
  * lines, never inside a line, a picture, a table row, a frame or a

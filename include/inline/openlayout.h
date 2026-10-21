@@ -53,5 +53,6 @@
 #define OL_UnscaleX(scale,px) LP2(0x120, LONG, OL_UnscaleX, const ol_scale *, scale, a0, LONG, px, d0, , OPENLAYOUT_BASE_NAME)
 #define OL_UnscaleY(scale,py) LP2(0x126, LONG, OL_UnscaleY, const ol_scale *, scale, a0, LONG, py, d0, , OPENLAYOUT_BASE_NAME)
 #define OL_DrawPage(req) LP1(0x12c, ULONG, OL_DrawPage, struct OLDrawPage *, req, a0, , OPENLAYOUT_BASE_NAME)
+#define OL_NodeSetTabs(req) LP1(0x132, BOOL, OL_NodeSetTabs, struct OLNodeTabs *, req, a0, , OPENLAYOUT_BASE_NAME)
 
 #endif

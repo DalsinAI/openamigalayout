@@ -54,4 +54,5 @@ VOID OL_ScaleFit(ol_scale *scale, LONG length, LONG pixels)(a0,d0,d1)
 LONG OL_UnscaleX(const ol_scale *scale, LONG px)(a0,d0)
 LONG OL_UnscaleY(const ol_scale *scale, LONG py)(a0,d0)
 ULONG OL_DrawPage(struct OLDrawPage *req)(a0)
+BOOL OL_NodeSetTabs(struct OLNodeTabs *req)(a0)
 ==end

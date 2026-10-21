@@ -253,7 +253,7 @@ Semantic snapshots, role/name selectors, action dispatch and headless page tests
 ### L5 — Advanced layout
 Tables, lists, floats where needed, pagination, tabs, shaped cluster line breaking and incremental reflow.
 
-0.2 (21 October 2026) does pagination, grid tables, frames, alignment and justification, shared baselines, font numbers, the caret and character hit-testing, and drawing at the display's resolution (`ol_scale`, `ol_draw_page`) for OpenWrite, the presentation program and desktop publishing. Still to come here: tabs, widows and orphans, headers and footers as page furniture, columns, rotated frames, shaped cluster line breaking and incremental reflow.
+0.2 (21 October 2026) does pagination, grid tables, frames, alignment and justification, left tab stops (a hanging first line stops at the left edge, as a list's does), shared baselines, font numbers, the caret and character hit-testing, and drawing at the display's resolution (`ol_scale`, `ol_draw_page`) for OpenWrite, the presentation program and desktop publishing. Still to come here: centred, right and decimal tabs, widows and orphans, headers and footers as page furniture, columns, rotated frames, shaped cluster line breaking and incremental reflow.
 
 ### Drawing at the display's resolution
 

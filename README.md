@@ -34,6 +34,8 @@ publishing need, on the same tree and display list:
 - frames placed out of the flow (text boxes, pictures, slides' shapes);
 - alignment (start, centre, end, justified) and one baseline a line, so
   mixed sizes and pictures line up;
+- tab stops: a block's own, then every half inch; a first line that
+  hangs stops at the left edge, so a list's text lines up;
 - a font number for each run, passed to the measure callback and the
   renderer;
 - the caret and the character under a point, for editing;
@@ -67,7 +69,7 @@ Resident Amiga library and ABI test:
 ./build-library.sh
 ```
 
-The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup. The current ABI is `openlayout.library` 3.0. Version 2 added the node inspection vectors required by shared renderers and automation; version 3 adds the document calls (pages, tables, frames, the caret, the display scale and `OL_DrawPage`) after them, so programs built for version 2 keep working. A program that uses the document calls opens `OPENLAYOUTLIB_DOCUMENT_VERSION` (3).
+The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup. The current ABI is `openlayout.library` 3.0. Version 2 added the node inspection vectors required by shared renderers and automation; version 3 adds the document calls (pages, tables, frames, tab stops, the caret, the display scale and `OL_DrawPage`) after them, so programs built for version 2 keep working. A program that uses the document calls opens `OPENLAYOUTLIB_DOCUMENT_VERSION` (3).
 
 The OS 3.2.3 / AC090 68040 qualification opens the library from `LIBS:` and runs both the normal ABI test and a 48-node stress test covering allocation growth, metadata, image nodes, layout and display-list access.
 

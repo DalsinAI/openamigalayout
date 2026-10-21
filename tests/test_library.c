@@ -203,6 +203,16 @@ int main(void)
             CHECK(drawn == range_req.count);
             CHECK(OL_UnscaleX(&scale, 100) == OL_POINT(100));
         }
+        {
+            struct OLNodeTabs tabs_req;
+            ol_unit stop = OL_CSSPX(40);
+            tabs_req.node = p;
+            tabs_req.count = 1;
+            tabs_req.stops = &stop;
+            CHECK(OL_NodeSetTabs(&tabs_req));
+            tabs_req.count = OL_MAX_TABS + 1;
+            CHECK(!OL_NodeSetTabs(&tabs_req));
+        }
         printf("LAYOUTLIB PAGES %ld\n", (long)OL_PageCount(paged));
         OL_DocumentFree(paged);
     }
