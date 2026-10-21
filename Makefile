@@ -6,7 +6,7 @@ BUILD = build
 
 .PHONY: all test clean
 
-all: $(BUILD)/libopenlayout.a $(BUILD)/test_layout
+all: $(BUILD)/libopenlayout.a $(BUILD)/test_layout $(BUILD)/test_document
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -20,8 +20,12 @@ $(BUILD)/libopenlayout.a: $(BUILD)/openlayout.o
 $(BUILD)/test_layout: tests/test_layout.c $(BUILD)/libopenlayout.a
 	$(CC) $(CFLAGS) $(WARN) -Iinclude tests/test_layout.c $(BUILD)/libopenlayout.a -o $@
 
-test: $(BUILD)/test_layout
+$(BUILD)/test_document: tests/test_document.c $(BUILD)/libopenlayout.a
+	$(CC) $(CFLAGS) $(WARN) -Iinclude tests/test_document.c $(BUILD)/libopenlayout.a -o $@
+
+test: $(BUILD)/test_layout $(BUILD)/test_document
 	./$(BUILD)/test_layout
+	./$(BUILD)/test_document
 
 clean:
 	rm -rf $(BUILD)

@@ -253,4 +253,18 @@ Semantic snapshots, role/name selectors, action dispatch and headless page tests
 ### L5 — Advanced layout
 Tables, lists, floats where needed, pagination, tabs, shaped cluster line breaking and incremental reflow.
 
+0.2 (21 October 2026) does pagination, grid tables, frames, alignment and justification, left tab stops (a hanging first line stops at the left edge, as a list's does), shared baselines, font numbers, the caret and character hit-testing, and drawing at the display's resolution (`ol_scale`, `ol_draw_page`) for OpenWrite, the presentation program and desktop publishing. Still to come here: centred, right and decimal tabs, widows and orphans, headers and footers as page furniture, columns, rotated frames, shaped cluster line breaking and incremental reflow.
+
+### Drawing at the display's resolution
+
+Dale, 21 October 2026: pages are high quality and resolution independent, drawn scaled to the screen's pixels, "not bitmap centric, rather, driven to the display". So:
+
+- layout never sees the screen: text is measured at full resolution (outline metrics), so line and page breaks do not move with zoom or screen;
+- one scale, a fraction num/den of pixels per unit, set from dots per inch and zoom or from a length to fit; each coordinate is one 32 x 32 to 64 bit multiply and a shift (8.24 fixed point), never a division;
+- edges are rounded, not lengths, so touching boxes touch at every zoom;
+- `ol_draw_page` passes over the ops outside the area being drawn without converting them, so a scroll or a damaged rectangle costs what it shows;
+- fonts are asked for at the scaled pixel size; nothing is rendered into a big bitmap and filtered down.
+
+OpenGfx (opengpu.library, the Cairo and pixman replacement) takes the same scale and OpenLayout's units, so OpenBrowser and the office programs share one rasteriser and one resolution model.
+
 The governing rule is: add layout capability because a real Open app needs it, not because a web standard contains it.
