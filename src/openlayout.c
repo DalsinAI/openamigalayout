@@ -585,12 +585,15 @@ static int finish_line(ol_inline_flow *flow, int last)
             ol_unit dx = flow->align == OL_ALIGN_END ? extra : extra / 2;
             for (i = first; i < end; ++i) shift_op_x(&doc->ops[i], dx);
         } else if (flow->align == OL_ALIGN_JUSTIFY && !last) {
-            size_t gaps = 0, seen = 0;
+            ol_unit gaps = 0, seen = 0, share, rest;
             for (i = first; i + 1 < end; ++i)
                 if (op_ends_in_space(doc, &doc->ops[i])) ++gaps;
+            /* each gap's share, the remainder spread over the first ones:
+             * 32 bit divisions, which a 68040 does itself */
+            share = gaps ? extra / gaps : 0;
+            rest = gaps ? extra % gaps : 0;
             for (i = first; gaps && i < end; ++i) {
-                shift_op_x(&doc->ops[i],
-                           (ol_unit)((int64_t)extra * (int64_t)seen / (int64_t)gaps));
+                shift_op_x(&doc->ops[i], share * seen + (seen < rest ? seen : rest));
                 if (i + 1 < end && op_ends_in_space(doc, &doc->ops[i])) ++seen;
             }
         }
