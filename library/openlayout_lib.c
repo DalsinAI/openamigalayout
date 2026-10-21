@@ -28,6 +28,9 @@ int start(void) { return -1; }
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
     "openlayout.library 3.0 (21.10.2026) OpenLayout 0.2, AmigaChrome Team\r\n";
+/* for Version and the file's version tag: lib_id has none */
+static const char lib_ver[] __attribute__((used)) =
+    "$VER: openlayout.library 3.0 (21.10.2026) OpenLayout 0.2, AmigaChrome Team";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),
