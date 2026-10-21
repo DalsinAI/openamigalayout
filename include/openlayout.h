@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define OL_VERSION "0.1"
+#define OL_VERSION "0.2"
 
 /*
  * OpenLayout logical units are exact across the three worlds we care about:
@@ -65,15 +65,25 @@ typedef enum {
 typedef enum {
     OL_ALIGN_START = 0,
     OL_ALIGN_CENTER,
-    OL_ALIGN_END
+    OL_ALIGN_END,
+    OL_ALIGN_JUSTIFY      /* 0.2: every line but a paragraph's last fills the width */
 } ol_text_align;
 
 enum {
     OL_TEXT_BOLD      = 1u << 0,
     OL_TEXT_ITALIC    = 1u << 1,
     OL_TEXT_UNDERLINE = 1u << 2,
-    OL_TEXT_MONO      = 1u << 3
+    OL_TEXT_MONO      = 1u << 3,
+    OL_TEXT_STRIKE    = 1u << 4,
+    OL_TEXT_SUPER     = 1u << 5,
+    OL_TEXT_SUB       = 1u << 6
 };
+
+/* 0.2: the font a text uses, as a number the measure callback and the
+ * renderer agree on (0: the default), in text_flags' top 16 bits, so an
+ * ol_style stays the size it was. */
+#define OL_TEXT_FONT(n) (((uint32_t)(n) & 0xffffu) << 16)
+#define OL_TEXT_FONT_OF(flags) ((unsigned)((flags) >> 16))
 
 enum {
     OL_ACTION_ACTIVATE = 1u << 0,
@@ -166,6 +176,10 @@ typedef struct {
         ol_image_op image;
         ol_rule_op rule;
     } u;
+    /* 0.2: the page the op is on, from 0. After ol_layout_pages the op's
+     * coordinates are the page's (its top left corner is 0,0, margins
+     * included); after ol_layout every op is on page 0. */
+    int32_t page;
 } ol_display_op;
 
 ol_document *ol_document_new(void);
@@ -213,6 +227,155 @@ size_t ol_display_count(const ol_document *doc);
 const ol_display_op *ol_display_get(const ol_document *doc, size_t index);
 
 const char *ol_role_name(ol_role role);
+
+/* ---- Documents: pages, tables, frames (0.2) ---------------------------- */
+
+/* What a node's ol_style has no room for. Set with ol_node_set_box; a
+ * node without one has ol_box_style_init's values. */
+enum {
+    OL_BOX_PAGE_BREAK_BEFORE = 1u << 0,  /* starts a new page */
+    OL_BOX_KEEP_TOGETHER     = 1u << 1,  /* never split across pages */
+    OL_BOX_KEEP_WITH_NEXT    = 1u << 2,  /* on the same page as the next block's first line */
+    OL_BOX_ABSOLUTE          = 1u << 3,  /* a frame at box.frame, out of the flow */
+    OL_BOX_EMPTY_LINE        = 1u << 4   /* with no content, still one line high
+                                            (a word processor's empty paragraph) */
+};
+
+enum {
+    OL_BORDER_TOP    = 1u << 0,
+    OL_BORDER_RIGHT  = 1u << 1,
+    OL_BORDER_BOTTOM = 1u << 2,
+    OL_BORDER_LEFT   = 1u << 3,
+    OL_BORDER_ALL    = 15u
+};
+
+typedef struct {
+    uint32_t size;            /* sizeof(ol_box_style) */
+    uint32_t flags;           /* OL_BOX_... */
+    ol_unit text_indent;      /* the first line, from the left edge; below 0 hangs */
+    /* OL_BOX_ABSOLUTE: where the frame is, from its containing block's
+     * content corner (the galley's top left for the document's own
+     * frames); height 0 grows with its content */
+    ol_rect frame;
+    ol_unit border_width;     /* 0: none */
+    uint32_t border_argb;
+    uint32_t border_sides;    /* OL_BORDER_... */
+    int32_t column_span;      /* a table cell's columns; 0 or 1: one */
+} ol_box_style;
+
+void ol_box_style_init(ol_box_style *box);
+/* Copies box->size bytes at most, so a smaller older ol_box_style works. */
+void ol_node_set_box(ol_node *node, const ol_box_style *box);
+const ol_box_style *ol_node_box(const ol_node *node);
+
+/* A table's column widths (at most OL_MAX_COLUMNS). Without them, its
+ * columns share its width equally; with them, they are scaled down when
+ * they add up to more than the table's width. */
+#define OL_MAX_COLUMNS 64
+int ol_node_set_columns(ol_node *node, int count, const ol_unit *widths);
+
+/* Pages. ol_layout_pages lays the document out at the page's width less
+ * its margins, as a galley, then cuts the galley into pages: between
+ * lines, never inside a line, a picture, a table row, a frame or a
+ * OL_BOX_KEEP_TOGETHER block (unless it is taller than a page), and
+ * before every OL_BOX_PAGE_BREAK_BEFORE block. A page does not start with
+ * the space between paragraphs. Node bounds stay in galley coordinates;
+ * ol_hit_test_page and ol_caret_box answer in a page's. */
+typedef struct {
+    ol_unit width, height;
+    ol_unit margin_top, margin_right, margin_bottom, margin_left;
+} ol_page;
+
+int ol_layout_pages(ol_document *doc, const ol_page *page,
+                    ol_measure_text_fn measure, void *measure_userdata);
+/* 1 after ol_layout; the number of pages after ol_layout_pages. */
+int ol_page_count(const ol_document *doc);
+/* The display ops of one page are together, in page order: the first and
+ * how many. 0 when the page does not exist. */
+int ol_display_page_range(const ol_document *doc, int page,
+                          size_t *first, size_t *count);
+
+/* The deepest node at (x, y) on a page, in its coordinates. */
+const ol_node *ol_hit_test_page(const ol_document *doc, int page,
+                                ol_unit x, ol_unit y);
+
+/* Editing: the character at a point, and where the caret goes for one.
+ * Offsets are bytes into a text node's UTF-8 text, on character
+ * boundaries. The measure callback must be the one the layout used. */
+typedef struct {
+    ol_id node_id;            /* a text, link or other inline node */
+    size_t offset;
+} ol_text_position;
+
+/* The text position nearest to (x, y) on a page: on the line at y (or the
+ * nearest line), before or after the character under x. */
+int ol_hit_text(const ol_document *doc, int page, ol_unit x, ol_unit y,
+                ol_measure_text_fn measure, void *measure_userdata,
+                ol_text_position *pos);
+/* The caret for a text position: its page and a zero-width box the
+ * line's height. 0 when the position is not laid out. */
+int ol_caret_box(const ol_document *doc, const ol_text_position *pos,
+                 ol_measure_text_fn measure, void *measure_userdata,
+                 int *page, ol_rect *box);
+
+/* ---- Drawing at the display's resolution (0.2) --------------------------
+ *
+ * Layout is in units and never changes with the screen; a renderer draws
+ * a page straight at its display's pixels through an ol_scale. pixels =
+ * units * num / den: num / den is set once (dots per inch and zoom, or a
+ * length to fit), then every coordinate is one multiply and shift, no
+ * division. Edges are rounded, not lengths, so boxes that touch in units
+ * touch in pixels at every zoom, and each word lands where it belongs.
+ * Text is measured for layout at full resolution and drawn with a font
+ * at the scaled pixel size, so line and page breaks do not move with the
+ * zoom. Nothing is drawn into a big bitmap and scaled down: ol_draw_page
+ * hands the renderer only the ops that cross the area being drawn,
+ * already in pixels. */
+typedef struct {
+    int32_t num, den;         /* pixels per unit, as a fraction */
+    int32_t origin_x;         /* where the page's top left corner is, in pixels */
+    int32_t origin_y;
+    uint32_t mul;             /* num / den in 8.24 fixed point: ol_scale_set's */
+} ol_scale;
+
+typedef struct {
+    int32_t x, y, width, height;
+} ol_pixel_rect;
+
+/* num / den pixels a unit; the origin is left as it was. */
+void ol_scale_set(ol_scale *scale, int32_t num, int32_t den);
+/* dpi pixels an inch at zoom_percent (72, 100: a point a pixel). */
+void ol_scale_dpi(ol_scale *scale, int dpi, int zoom_percent);
+/* length units in pixels pixels: a page's width to a window's. */
+void ol_scale_fit(ol_scale *scale, ol_unit length, int32_t pixels);
+
+/* A position in pixels, and back (for the pointer). */
+int32_t ol_scale_x(const ol_scale *scale, ol_unit x);
+int32_t ol_scale_y(const ol_scale *scale, ol_unit y);
+ol_unit ol_unscale_x(const ol_scale *scale, int32_t px);
+ol_unit ol_unscale_y(const ol_scale *scale, int32_t py);
+/* A length (a font size, a rule): at least one pixel when it is not 0. */
+int32_t ol_scale_length(const ol_scale *scale, ol_unit length);
+/* A box by its edges. */
+ol_pixel_rect ol_scale_rect(const ol_scale *scale, ol_rect r);
+
+/* One display op in pixels. */
+typedef struct {
+    const ol_display_op *op;  /* the op in units: its node, text, style, image */
+    ol_pixel_rect box;        /* text, fill, image: edges rounded */
+    int32_t baseline;         /* text */
+    int32_t font_pixels;      /* text: the font's size at this scale */
+    int32_t x1, y1, x2, y2;   /* rule */
+    int32_t thickness;        /* rule: at least one pixel */
+} ol_device_op;
+
+typedef void (*ol_draw_fn)(void *userdata, const ol_device_op *op);
+
+/* Draws one page: calls draw, in drawing order, for each of its ops that
+ * crosses clip (pixels; NULL: all of them), in pixels through scale.
+ * Returns how many it drew. */
+size_t ol_draw_page(const ol_document *doc, int page, const ol_scale *scale,
+                    const ol_pixel_rect *clip, ol_draw_fn draw, void *userdata);
 
 #ifdef __cplusplus
 }

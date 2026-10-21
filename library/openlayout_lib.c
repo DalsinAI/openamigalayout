@@ -1,4 +1,5 @@
-/* openlayout.library 2.0
+/* openlayout.library 3.0: version 3 adds pages, tables, frames and the
+ * caret (OpenLayout 0.2) after version 2's calls, which are unchanged.
  * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
 #include <exec/types.h>
@@ -12,7 +13,7 @@
 #include "../include/libraries/openlayout.h"
 
 #define REG(r, decl) register decl __asm(#r)
-#define LIB_VERSION 2
+#define LIB_VERSION 3
 #define LIB_REVISION 0
 
 struct OpenLayoutLibBase {
@@ -26,7 +27,7 @@ int start(void) { return -1; }
 
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
-    "openlayout.library 2.0 (7.10.2026) OpenLayout 0.1, AmigaChrome Team\r\n";
+    "openlayout.library 3.0 (21.10.2026) OpenLayout 0.2, AmigaChrome Team\r\n";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),
@@ -66,6 +67,22 @@ static ULONG OL_NodeRole(REG(a0, const ol_node *node), REG(a6, struct OpenLayout
 static CONST_STRPTR OL_NodeText(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
 static CONST_STRPTR OL_NodeName(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
 static CONST_STRPTR OL_NodeValue(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
+static void OL_BoxStyleInit(REG(a0, ol_box_style *box), REG(a6, struct OpenLayoutLibBase *base));
+static void OL_NodeSetBox(REG(a0, struct OLNodeBox *r), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_NodeSetColumns(REG(a0, struct OLNodeColumns *r), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_LayoutPages(REG(a0, struct OLLayoutPagesRequest *r), REG(a6, struct OpenLayoutLibBase *base));
+static LONG OL_PageCount(REG(a0, const ol_document *doc), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_DisplayPageRange(REG(a0, struct OLPageRange *r), REG(a6, struct OpenLayoutLibBase *base));
+static const ol_node *OL_HitTestPage(REG(a0, struct OLHitTestPage *r), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_HitText(REG(a0, struct OLHitText *r), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_CaretBox(REG(a0, struct OLCaretBox *r), REG(a6, struct OpenLayoutLibBase *base));
+static const ol_box_style *OL_NodeBox(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base));
+static void OL_ScaleSet(REG(a0, ol_scale *scale), REG(d0, LONG num), REG(d1, LONG den), REG(a6, struct OpenLayoutLibBase *base));
+static void OL_ScaleDPI(REG(a0, ol_scale *scale), REG(d0, LONG dpi), REG(d1, LONG zoom), REG(a6, struct OpenLayoutLibBase *base));
+static void OL_ScaleFit(REG(a0, ol_scale *scale), REG(d0, LONG length), REG(d1, LONG pixels), REG(a6, struct OpenLayoutLibBase *base));
+static LONG OL_UnscaleX(REG(a0, const ol_scale *scale), REG(d0, LONG px), REG(a6, struct OpenLayoutLibBase *base));
+static LONG OL_UnscaleY(REG(a0, const ol_scale *scale), REG(d0, LONG py), REG(a6, struct OpenLayoutLibBase *base));
+static ULONG OL_DrawPage(REG(a0, struct OLDrawPage *r), REG(a6, struct OpenLayoutLibBase *base));
 
 static const APTR lib_vectors[] = {
     (APTR)lib_open, (APTR)lib_close, (APTR)lib_expunge, (APTR)lib_null,
@@ -80,6 +97,12 @@ static const APTR lib_vectors[] = {
     (APTR)OL_DocumentGeneration, (APTR)OL_DisplayCount, (APTR)OL_DisplayGet,
     (APTR)OL_StyleInit, (APTR)OL_NodeByID, (APTR)OL_NodeRole,
     (APTR)OL_NodeText, (APTR)OL_NodeName, (APTR)OL_NodeValue,
+    /* version 3 */
+    (APTR)OL_BoxStyleInit, (APTR)OL_NodeSetBox, (APTR)OL_NodeSetColumns,
+    (APTR)OL_LayoutPages, (APTR)OL_PageCount, (APTR)OL_DisplayPageRange,
+    (APTR)OL_HitTestPage, (APTR)OL_HitText, (APTR)OL_CaretBox, (APTR)OL_NodeBox,
+    (APTR)OL_ScaleSet, (APTR)OL_ScaleDPI, (APTR)OL_ScaleFit,
+    (APTR)OL_UnscaleX, (APTR)OL_UnscaleY, (APTR)OL_DrawPage,
     (APTR)-1
 };
 
@@ -324,4 +347,114 @@ static CONST_STRPTR OL_NodeValue(REG(a0, const ol_node *node), REG(a6, struct Op
 {
     (void)base;
     return (CONST_STRPTR)ol_node_value(node);
+}
+
+/* ---- version 3 ------------------------------------------------------------ */
+
+static void OL_BoxStyleInit(REG(a0, ol_box_style *box), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    ol_box_style_init(box);
+}
+
+static void OL_NodeSetBox(REG(a0, struct OLNodeBox *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    if (r) ol_node_set_box(r->node, r->box);
+}
+
+static BOOL OL_NodeSetColumns(REG(a0, struct OLNodeColumns *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return r && ol_node_set_columns(r->node, (int)r->count, r->widths) ? TRUE : FALSE;
+}
+
+static BOOL OL_LayoutPages(REG(a0, struct OLLayoutPagesRequest *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return r && ol_layout_pages(r->document, r->page, r->measure, r->measure_userdata) ? TRUE : FALSE;
+}
+
+static LONG OL_PageCount(REG(a0, const ol_document *doc), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return (LONG)ol_page_count(doc);
+}
+
+static BOOL OL_DisplayPageRange(REG(a0, struct OLPageRange *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    size_t first, count;
+    (void)base;
+    if (!r || !ol_display_page_range(r->document, (int)r->page, &first, &count)) return FALSE;
+    r->first = (ULONG)first;
+    r->count = (ULONG)count;
+    return TRUE;
+}
+
+static const ol_node *OL_HitTestPage(REG(a0, struct OLHitTestPage *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    if (!r) return NULL;
+    return ol_hit_test_page(r->document, (int)r->page, r->x, r->y);
+}
+
+static BOOL OL_HitText(REG(a0, struct OLHitText *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return r && ol_hit_text(r->document, (int)r->page, r->x, r->y, r->measure,
+                            r->measure_userdata, r->position) ? TRUE : FALSE;
+}
+
+static BOOL OL_CaretBox(REG(a0, struct OLCaretBox *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    int page = 0;
+    (void)base;
+    if (!r || !ol_caret_box(r->document, r->position, r->measure, r->measure_userdata,
+                            &page, r->box))
+        return FALSE;
+    r->page = page;
+    return TRUE;
+}
+
+static const ol_box_style *OL_NodeBox(REG(a0, const ol_node *node), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return ol_node_box(node);
+}
+
+static void OL_ScaleSet(REG(a0, ol_scale *scale), REG(d0, LONG num), REG(d1, LONG den), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    ol_scale_set(scale, num, den);
+}
+
+static void OL_ScaleDPI(REG(a0, ol_scale *scale), REG(d0, LONG dpi), REG(d1, LONG zoom), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    ol_scale_dpi(scale, (int)dpi, (int)zoom);
+}
+
+static void OL_ScaleFit(REG(a0, ol_scale *scale), REG(d0, LONG length), REG(d1, LONG pixels), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    ol_scale_fit(scale, length, pixels);
+}
+
+static LONG OL_UnscaleX(REG(a0, const ol_scale *scale), REG(d0, LONG px), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return scale ? ol_unscale_x(scale, px) : 0;
+}
+
+static LONG OL_UnscaleY(REG(a0, const ol_scale *scale), REG(d0, LONG py), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return scale ? ol_unscale_y(scale, py) : 0;
+}
+
+static ULONG OL_DrawPage(REG(a0, struct OLDrawPage *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    if (!r) return 0;
+    return (ULONG)ol_draw_page(r->document, (int)r->page, r->scale, r->clip, r->draw, r->userdata);
 }
