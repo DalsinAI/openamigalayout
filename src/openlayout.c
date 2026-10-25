@@ -157,6 +157,18 @@ static int reserve_ops(ol_document *doc, size_t extra)
     return 1;
 }
 
+int ol_document_reserve(ol_document *doc, size_t ops)
+{
+    ol_display_op *p;
+    if (!doc) return 0;
+    if (ops <= doc->op_capacity) return 1;
+    p = (ol_display_op *)realloc(doc->ops, ops * sizeof(*p));
+    if (!p) return 0;
+    doc->ops = p;
+    doc->op_capacity = ops;
+    return 1;
+}
+
 static ol_display_op *append_op(ol_document *doc, ol_op_type type)
 {
     ol_display_op *op;
@@ -1659,16 +1671,128 @@ static int op_layer(const ol_anchor *a)
 
 /* The galley's ops sorted onto their pages, each page's together: on each
  * page the anchored frames behind the text, the text, the frames in front. */
-static int sort_ops_into_pages(ol_document *doc)
+/* The anchored frame holding op i, found by halves (the frames' ops come in order); NULL when none does. */
+static const ol_anchor *anchor_at(const ol_document *doc, size_t i)
 {
-    size_t i, k, total = 0;
-    size_t *next;
+    size_t lo = 0, hi = doc->anchor_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (doc->anchors[mid].end <= i) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < doc->anchor_count && doc->anchors[lo].first <= i ? &doc->anchors[lo] : NULL;
+}
+
+/* An op as it goes on the first page it is placed on (its frame's page for an anchored one, moved there):
+ * what sort_ops_into_pages puts in its first place. 0 when it is on no page. */
+static int first_placement(const ol_document *doc, const ol_anchor *a, ol_display_op *op)
+{
+    int first, last, split, p;
+    if (a) {
+        ol_unit ox, oy;
+        p = anchor_place(doc, a, 1, &ox, &oy);
+        move_op(op, ox, oy);
+        op->page = p;
+        return 1;
+    }
+    op_pages(doc, op, &first, &last, &split);
+    for (p = first; p <= last; ++p) {
+        ol_display_op tmp = *op;
+        if (place_op(doc, &tmp, p, split)) {
+            *op = tmp;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 0.5: the ops sorted into their pages where they are, not copied into a second array as large: on each page
+ * the frames behind first, then the page's own ops, then the frames in front, each in the galley's order, an
+ * op that crosses pages on each of them. Each op's first place is worked out first and kept in its page
+ * field; the ops are then moved along the chains those places make (an op saved before its place is
+ * written over), and the second and later places of the few ops that cross pages, kept aside, written last.
+ * A display list laid out again after each edit then needs no block but its own (ol_document_reserve):
+ * on an Amiga a second one of about 2 MB, and the old one's doubling, kept leaving 3 MB of libnix's pools
+ * behind each time. */
+#ifdef OL_CHECK_SORT
+/* For the tests (make test builds with it): 0.4's sort, into an array of its own, to hold the one in place
+ * against. ol_sort_checks counts the lists compared, ol_sort_mismatches those that differed. */
+int ol_sort_checks, ol_sort_mismatches;
+
+static ol_display_op *sort_ops_copy(const ol_document *doc, const ol_display_op *src, size_t n, size_t *count)
+{
+    size_t i, k, total = 0, *next, *at;
     ol_display_op *ops;
     int p, layer;
-
-    for (i = 0, k = 0; i < doc->op_count; ++i) {
+    at = (size_t *)calloc((size_t)(doc->page_count ? doc->page_count : 1), sizeof(*at));
+    if (!at) return NULL;
+    for (i = 0, k = 0; i < n; ++i) {
         const ol_anchor *a = anchor_of(doc, i, &k);
         int first, last, split;
+        if (a) {
+            ol_unit ox, oy;
+            ++at[anchor_place(doc, a, 1, &ox, &oy)];
+            ++total;
+            continue;
+        }
+        op_pages(doc, &src[i], &first, &last, &split);
+        for (p = first; p <= last; ++p) {
+            ol_display_op tmp = src[i];
+            if (place_op(doc, &tmp, p, split)) { ++at[p]; ++total; }
+        }
+    }
+    ops = (ol_display_op *)malloc((total ? total : 1) * sizeof(*ops));
+    next = (size_t *)malloc((size_t)(doc->page_count ? doc->page_count : 1) * sizeof(*next));
+    if (!ops || !next) { free(ops); free(next); free(at); return NULL; }
+    for (p = 0, i = 0; p < doc->page_count; ++p) { next[p] = i; i += at[p]; }
+    for (layer = 0; layer < 3; ++layer)
+        for (i = 0, k = 0; i < n; ++i) {
+            const ol_anchor *a = anchor_of(doc, i, &k);
+            int first, last, split;
+            if (op_layer(a) != layer) continue;
+            if (a) {
+                ol_unit ox, oy;
+                ol_display_op tmp = src[i];
+                p = anchor_place(doc, a, 1, &ox, &oy);
+                move_op(&tmp, ox, oy);
+                tmp.page = p;
+                ops[next[p]++] = tmp;
+                continue;
+            }
+            op_pages(doc, &src[i], &first, &last, &split);
+            for (p = first; p <= last; ++p) {
+                ol_display_op tmp = src[i];
+                if (place_op(doc, &tmp, p, split)) ops[next[p]++] = tmp;
+            }
+        }
+    free(next);
+    free(at);
+    *count = total;
+    return ops;
+}
+#endif
+
+static int sort_ops_into_pages(ol_document *doc)
+{
+    typedef struct { size_t slot; ol_display_op op; } later_place;
+    size_t i, k, total = 0, extra = 0, n = doc->op_count, e = 0;
+    size_t *next;
+    unsigned char *moved;
+    later_place *more = NULL;
+    int p, layer;
+#ifdef OL_CHECK_SORT
+    size_t ref_count = 0;
+    ol_display_op *src = (ol_display_op *)malloc((n ? n : 1) * sizeof(*src)), *ref;
+    if (!src) return 0;
+    memcpy(src, doc->ops, n * sizeof(*src));
+    ref = sort_ops_copy(doc, src, n, &ref_count);
+    free(src);
+    if (!ref) return 0;
+#endif
+
+    for (i = 0, k = 0; i < n; ++i) {
+        const ol_anchor *a = anchor_of(doc, i, &k);
+        int first, last, split, placed = 0;
         if (a) {
             ol_unit ox, oy;
             ++doc->page_ops[anchor_place(doc, a, 1, &ox, &oy)];
@@ -1681,14 +1805,18 @@ static int sort_ops_into_pages(ol_document *doc)
             if (place_op(doc, &tmp, p, split)) {
                 ++doc->page_ops[p];
                 ++total;
+                if (placed++) ++extra;
             }
         }
     }
-    ops = (ol_display_op *)malloc((total ? total : 1) * sizeof(*ops));
-    next = (size_t *)malloc((size_t)doc->page_count * sizeof(*next));
-    if (!ops || !next) {
-        free(ops);
+    if (!ol_document_reserve(doc, total > n ? total : n)) return 0;
+    next = (size_t *)malloc((size_t)(doc->page_count ? doc->page_count : 1) * sizeof(*next));
+    moved = (unsigned char *)calloc(n / 8 + 1, 1);
+    more = extra ? (later_place *)malloc(extra * sizeof(*more)) : NULL;
+    if (!next || !moved || (extra && !more)) {
         free(next);
+        free(moved);
+        free(more);
         return 0;
     }
     for (p = 0, i = 0; p < doc->page_count; ++p) {
@@ -1696,31 +1824,67 @@ static int sort_ops_into_pages(ol_document *doc)
         next[p] = i;
         i += doc->page_ops[p];
     }
+    /* each op's first place, in its page field; its later places aside */
     for (layer = 0; layer < 3; ++layer)
-        for (i = 0, k = 0; i < doc->op_count; ++i) {
+        for (i = 0, k = 0; i < n; ++i) {
             const ol_anchor *a = anchor_of(doc, i, &k);
-            int first, last, split;
+            int first, last, split, placed = 0;
+            size_t slot = 0;
             if (op_layer(a) != layer) continue;
             if (a) {
                 ol_unit ox, oy;
-                ol_display_op tmp = doc->ops[i];
-                p = anchor_place(doc, a, 1, &ox, &oy);
-                move_op(&tmp, ox, oy);
-                tmp.page = p;
-                ops[next[p]++] = tmp;
+                doc->ops[i].page = (int32_t)next[anchor_place(doc, a, 1, &ox, &oy)]++;
                 continue;
             }
             op_pages(doc, &doc->ops[i], &first, &last, &split);
             for (p = first; p <= last; ++p) {
                 ol_display_op tmp = doc->ops[i];
-                if (place_op(doc, &tmp, p, split)) ops[next[p]++] = tmp;
+                if (!place_op(doc, &tmp, p, split)) continue;
+                if (!placed++) {
+                    slot = next[p]++;
+                } else {
+                    more[e].slot = next[p]++;
+                    more[e].op = tmp;
+                    ++e;
+                }
+            }
+            doc->ops[i].page = placed ? (int32_t)slot : -1;
+        }
+    /* along the chains: an op into its place, the one there saved first and carried on to its own */
+    for (i = 0; i < n; ++i) {
+        ol_display_op carry;
+        size_t j;
+        if ((moved[i / 8] & (1u << (i % 8))) || doc->ops[i].page < 0) continue;
+        carry = doc->ops[i];
+        j = (size_t)carry.page;
+        moved[i / 8] |= (unsigned char)(1u << (i % 8));
+        first_placement(doc, anchor_at(doc, i), &carry);
+        for (;;) {
+            if (j < n && !(moved[j / 8] & (1u << (j % 8))) && doc->ops[j].page >= 0) {
+                ol_display_op held = doc->ops[j];
+                size_t to = (size_t)held.page;
+                moved[j / 8] |= (unsigned char)(1u << (j % 8));
+                doc->ops[j] = carry;
+                carry = held;
+                first_placement(doc, anchor_at(doc, j), &carry);
+                j = to;
+            } else {                                 /* a place no op still waits in: written, and done with */
+                doc->ops[j] = carry;
+                if (j < n) moved[j / 8] |= (unsigned char)(1u << (j % 8));
+                break;
             }
         }
+    }
+    for (i = 0; i < e; ++i) doc->ops[more[i].slot] = more[i].op;
+    free(more);
+    free(moved);
     free(next);
-    free(doc->ops);
-    doc->ops = ops;
     doc->op_count = total;
-    doc->op_capacity = total ? total : 1;
+#ifdef OL_CHECK_SORT
+    ++ol_sort_checks;
+    if (ref_count != total || memcmp(ref, doc->ops, total * sizeof(*ref))) ++ol_sort_mismatches;
+    free(ref);
+#endif
     return 1;
 }
 

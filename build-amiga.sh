@@ -13,6 +13,9 @@ mkdir -p "$OUT"
 "$CC" -m68040 -m68881 -O2 -fno-delete-null-pointer-checks -std=c99 -Wall -Wextra -Werror -pedantic -noixemul \
   -I"$HERE/include" "$HERE/tests/test_layout.c" "$OUT/libopenlayout.a" \
   -o "$OUT/LayoutTest"
+# 0.5: openlayout.library and its tests (LayoutLibTest, LayoutLibStress) too, for the lab (Cradle builds with
+# this script alone)
+OUT="$OUT/library" STOVE="$STOVE" CC="$CC" sh "$HERE/build-library.sh"
 echo "$OUT/libopenlayout.a ($(wc -c < "$OUT/libopenlayout.a") bytes)"
 echo "$OUT/LayoutTest ($(wc -c < "$OUT/LayoutTest") bytes)"
 sha256sum "$OUT/libopenlayout.a" "$OUT/LayoutTest"

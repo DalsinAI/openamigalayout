@@ -1,9 +1,10 @@
-/* openlayout.library 5.0: version 3 adds pages, tables, frames and the
+/* openlayout.library 6.0: version 3 adds pages, tables, frames and the
  * caret (OpenLayout 0.2) after version 2's calls, which are unchanged;
  * version 4 adds tab stops that align and their leaders (OpenLayout 0.3);
  * version 5 places frames anchored to their pages (OpenLayout 0.4, the
- * box style's anchor), with no new calls. Programs built for 2, 3 or 4
- * keep working.
+ * box style's anchor), with no new calls; version 6 adds
+ * OL_DocumentReserve and sorts the display list into its pages where it is
+ * (OpenLayout 0.5). Programs built for 2 to 5 keep working.
  * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
 #include <exec/types.h>
@@ -17,7 +18,7 @@
 #include "../include/libraries/openlayout.h"
 
 #define REG(r, decl) register decl __asm(#r)
-#define LIB_VERSION 5
+#define LIB_VERSION 6
 #define LIB_REVISION 0
 
 struct OpenLayoutLibBase {
@@ -31,10 +32,10 @@ int start(void) { return -1; }
 
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
-    "openlayout.library 5.0 (25.10.2026) OpenLayout 0.4, AmigaChrome Team\r\n";
+    "openlayout.library 6.0 (25.10.2026) OpenLayout 0.5, AmigaChrome Team\r\n";
 /* for Version and the file's version tag: lib_id has none */
 static const char lib_ver[] __attribute__((used)) =
-    "$VER: openlayout.library 5.0 (25.10.2026) OpenLayout 0.4, AmigaChrome Team";
+    "$VER: openlayout.library 6.0 (25.10.2026) OpenLayout 0.5, AmigaChrome Team";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),
@@ -92,6 +93,7 @@ static LONG OL_UnscaleY(REG(a0, const ol_scale *scale), REG(d0, LONG py), REG(a6
 static ULONG OL_DrawPage(REG(a0, struct OLDrawPage *r), REG(a6, struct OpenLayoutLibBase *base));
 static BOOL OL_NodeSetTabs(REG(a0, struct OLNodeTabs *r), REG(a6, struct OpenLayoutLibBase *base));
 static BOOL OL_NodeSetTabStops(REG(a0, struct OLNodeTabStops *r), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_DocumentReserve(REG(a0, struct OLDocumentReserve *r), REG(a6, struct OpenLayoutLibBase *base));
 
 static const APTR lib_vectors[] = {
     (APTR)lib_open, (APTR)lib_close, (APTR)lib_expunge, (APTR)lib_null,
@@ -114,6 +116,8 @@ static const APTR lib_vectors[] = {
     (APTR)OL_UnscaleX, (APTR)OL_UnscaleY, (APTR)OL_DrawPage, (APTR)OL_NodeSetTabs,
     /* version 4 */
     (APTR)OL_NodeSetTabStops,
+    /* version 6 (5 added no call) */
+    (APTR)OL_DocumentReserve,
     (APTR)-1
 };
 
@@ -488,4 +492,12 @@ static BOOL OL_NodeSetTabStops(REG(a0, struct OLNodeTabStops *r), REG(a6, struct
 {
     (void)base;
     return r && ol_node_set_tab_stops(r->node, (int)r->count, r->stops) ? TRUE : FALSE;
+}
+
+/* ---- version 6 ------------------------------------------------------------ */
+
+static BOOL OL_DocumentReserve(REG(a0, struct OLDocumentReserve *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return r && ol_document_reserve(r->document, (size_t)r->ops) ? TRUE : FALSE;
 }

@@ -12,7 +12,7 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 $(BUILD)/openlayout.o: src/openlayout.c include/openlayout.h | $(BUILD)
-	$(CC) $(CFLAGS) $(WARN) -Iinclude -c src/openlayout.c -o $@
+	$(CC) $(CFLAGS) $(WARN) -DOL_CHECK_SORT -Iinclude -c src/openlayout.c -o $@
 
 $(BUILD)/libopenlayout.a: $(BUILD)/openlayout.o
 	$(AR) rcs $@ $<

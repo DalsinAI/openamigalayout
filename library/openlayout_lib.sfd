@@ -57,4 +57,6 @@ ULONG OL_DrawPage(struct OLDrawPage *req)(a0)
 BOOL OL_NodeSetTabs(struct OLNodeTabs *req)(a0)
 * version 4: right, centred and decimal tab stops, and leaders (OpenLayout 0.3)
 BOOL OL_NodeSetTabStops(struct OLNodeTabStops *req)(a0)
+* version 6: the display list's room at once (OpenLayout 0.5)
+BOOL OL_DocumentReserve(struct OLDocumentReserve *req)(a0)
 ==end

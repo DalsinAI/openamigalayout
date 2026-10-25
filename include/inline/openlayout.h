@@ -56,5 +56,7 @@
 #define OL_NodeSetTabs(req) LP1(0x132, BOOL, OL_NodeSetTabs, struct OLNodeTabs *, req, a0, , OPENLAYOUT_BASE_NAME)
 /* version 4 */
 #define OL_NodeSetTabStops(req) LP1(0x138, BOOL, OL_NodeSetTabStops, struct OLNodeTabStops *, req, a0, , OPENLAYOUT_BASE_NAME)
+/* version 6 */
+#define OL_DocumentReserve(req) LP1(0x13e, BOOL, OL_DocumentReserve, struct OLDocumentReserve *, req, a0, , OPENLAYOUT_BASE_NAME)
 
 #endif
