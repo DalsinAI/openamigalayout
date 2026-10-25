@@ -1233,6 +1233,15 @@ static void test_wrap_pages(void)
         b = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
         snprintf(line, sizeof line, "line %02u with some more words to fill it up to the end", (unsigned)i);
         body[nb++] = ol_node_id(text(doc, b, line, OL_CSSPX(16), 0));
+        if (i == 4) {                           /* a page break, and a picture at the new page's top left */
+            ol_box_style box;
+            ol_box_style_init(&box);
+            box.flags = OL_BOX_PAGE_BREAK_BEFORE;
+            ol_node_set_box(b, &box);
+            f = wrapped(doc, b, OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), 0, 0,
+                        OL_CSSPX(80), OL_CSSPX(30), OL_WRAP_SQUARE, OL_CSSPX(10));
+            picture(doc, f, 5, OL_CSSPX(80), OL_CSSPX(30));
+        }
         if (i == 16) {                          /* on page 2: a picture at the right, from this paragraph */
             f = wrapped(doc, b, OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), OL_CSSPX(260), 0,
                         OL_CSSPX(100), OL_CSSPX(100), OL_WRAP_SQUARE, OL_CSSPX(10));
@@ -1276,6 +1285,12 @@ static void test_wrap_pages(void)
     /* the picture's paragraph wraps: its lines end before the picture */
     op = first_text(doc, ol_node_by_id(doc, body[16]));
     CHECK(op && op->page == 2);
+    /* after the break: the picture on the new page, the paragraph's first lines beside it */
+    op = first_text(doc, ol_node_by_id(doc, body[4]));
+    CHECK(op && op->page == 1 && op->u.text.bounds.x == OL_CSSPX(110) && op->u.text.bounds.y == OL_CSSPX(20));
+    for (i = 0; i < ol_display_count(doc); ++i)
+        if (ol_display_get(doc, i)->type == OL_OP_IMAGE && ol_display_get(doc, i)->u.image.image_id == 5)
+            CHECK(ol_display_get(doc, i)->page == 1 && ol_display_get(doc, i)->u.image.bounds.y == OL_CSSPX(20));
     /* the paragraph after the empty line is below the frame in it */
     {
         const ol_display_op *pic = NULL, *after = first_text(doc, ol_node_by_id(doc, body[nb - 1]));

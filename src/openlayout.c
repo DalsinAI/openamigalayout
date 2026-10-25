@@ -2007,12 +2007,14 @@ static int live_page(ol_document *doc, ol_unit y, ol_unit h)
         ol_unit end = limit, lo = limit, hi = limit, next = -1;
         size_t i;
         int grown, any = 0;
-        if (y + h <= limit || (y < limit && y <= start)) break;     /* y's first line is on this page */
         for (i = 0; i < doc->break_count; ++i)
             if (doc->breaks[i] > start && doc->breaks[i] <= limit && doc->breaks[i] < end) {
                 end = doc->breaks[i];
                 any = 1;
             }
+        /* y's first line is on this page: it fits, or it is taller than a page and starts it, with no page
+         * break before it */
+        if ((y + h <= limit || (y < limit && y <= start)) && (!any || end > y)) break;
         if (!any) {
             /* not inside a line, a row or a frame: the keeps across the limit, and the ones they overlap */
             do {
