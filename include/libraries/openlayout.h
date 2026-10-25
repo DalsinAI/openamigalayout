@@ -7,6 +7,7 @@
 #define OPENLAYOUTLIB_NAME "openlayout.library"
 #define OPENLAYOUTLIB_VERSION 2             /* the calls up to OL_NodeValue */
 #define OPENLAYOUTLIB_REVISION 0
+#define OPENLAYOUTLIB_EXACT_REVISION 1      /* with version 7: OL_BOX_EXACT_LINES laid out (7.0 ignores the flag) */
 #define OPENLAYOUTLIB_DOCUMENT_VERSION 3    /* pages, tables, frames, caret: OL_BoxStyleInit on */
 #define OPENLAYOUTLIB_TABSTOP_VERSION 4     /* right, centred and decimal tab stops, leaders: OL_NodeSetTabStops */
 #define OPENLAYOUTLIB_RESERVE_VERSION 6     /* the display list's room at once: OL_DocumentReserve, OL_DocumentNewReserved */

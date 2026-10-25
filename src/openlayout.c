@@ -161,6 +161,7 @@ typedef struct {
     ol_unit line_base;        /* where the line starts without zones (x0, or the first line's indent) */
     ol_unit nominal;          /* the height a line is taken to be, to find the zones it meets */
     ol_unit seg_height;       /* the tallest stretch finished on this line */
+    ol_unit exact;            /* 0.7: every line exactly this high (OL_BOX_EXACT_LINES); 0: as its content */
 } ol_inline_flow;
 
 static char *ol_strdup0(const char *s)
@@ -951,6 +952,10 @@ static int finish_line(ol_inline_flow *flow, int last)
     if (height < flow->line_height) height = flow->line_height;
     if (height <= 0) height = OL_CSSPX(20);
     baseline = flow->line_top + (height - (flow->ascent + flow->descent)) / 2 + flow->ascent;
+    if (flow->exact) {                       /* 0.7: exactly so high, the text on the line's bottom */
+        height = flow->exact;
+        baseline = flow->line_top + height - flow->descent;
+    }
 
     extra = flow->right - flow->content_right;
     if (extra > 0 && end > first) {
@@ -1016,6 +1021,8 @@ static void start_flow(ol_inline_flow *flow, ol_document *doc, const ol_node *bl
     flow->line_first_op = doc->op_count;
     flow->wraps = !doc->wrap_off;
     flow->room_pending = flow->wraps;
+    flow->exact = block && (block->box.flags & OL_BOX_EXACT_LINES) && block->style.line_height > 0
+                ? block->style.line_height : 0;
     flow->nominal = block && block->style.line_height > 0 ? block->style.line_height
                   : block && block->style.font_size > 0 ? block->style.font_size + block->style.font_size / 4
                   : OL_CSSPX(20);

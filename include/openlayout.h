@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define OL_VERSION "0.6"
+#define OL_VERSION "0.7"
 
 /*
  * OpenLayout logical units are exact across the three worlds we care about:
@@ -246,8 +246,14 @@ enum {
     OL_BOX_KEEP_TOGETHER     = 1u << 1,  /* never split across pages */
     OL_BOX_KEEP_WITH_NEXT    = 1u << 2,  /* on the same page as the next block's first line */
     OL_BOX_ABSOLUTE          = 1u << 3,  /* a frame at box.frame, out of the flow */
-    OL_BOX_EMPTY_LINE        = 1u << 4   /* with no content, still one line high
+    OL_BOX_EMPTY_LINE        = 1u << 4,  /* with no content, still one line high
                                             (a word processor's empty paragraph) */
+    /* 0.7: every line of the block's own text exactly its style's
+     * line_height high (a word processor's exact line spacing), even when
+     * its text is taller: the text stands on the line's bottom and its top
+     * runs over the line above. Without it line_height is the least a line
+     * is (a word processor's "at least"). */
+    OL_BOX_EXACT_LINES       = 1u << 5
 };
 
 enum {
