@@ -265,6 +265,24 @@ int main(void)
             CHECK(OL_LayoutPages(&pages_req));
             CHECK(OL_PageCount(paged) == pages);
         }
+        if (OpenLayoutBase->lib_Version >= OPENLAYOUTLIB_RESERVE_VERSION) {
+            /* room for the display list at once; laid out again, the pages as they were */
+            struct OLDocumentReserve reserve_req;
+            LONG pages = OL_PageCount(paged);
+            reserve_req.document = paged;
+            reserve_req.ops = 2 * OL_DisplayCount(paged) + 16;
+            CHECK(OL_DocumentReserve(&reserve_req));
+            CHECK(OL_LayoutPages(&pages_req));
+            CHECK(OL_PageCount(paged) == pages);
+            reserve_req.document = NULL;
+            CHECK(!OL_DocumentReserve(&reserve_req));
+            {
+                ol_document *roomy = OL_DocumentNewReserved(1000);
+                CHECK(roomy != NULL);
+                CHECK(OL_DisplayCount(roomy) == 0);
+                OL_DocumentFree(roomy);
+            }
+        }
         printf("LAYOUTLIB PAGES %ld\n", (long)OL_PageCount(paged));
         OL_DocumentFree(paged);
     }

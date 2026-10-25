@@ -898,6 +898,110 @@ static void test_aligned_tabs(void)
     ol_document_free(doc);
 }
 
+/* 0.5: the display list sorted into its pages where it is (and no second array): the same as 0.4's copy
+ * (OL_CHECK_SORT, which make test builds with, compares every sort with it), on documents with what moves
+ * ops about: shaded blocks and table rows crossing pages (on each page, cut), frames behind and in front
+ * on their pages, empty pages; laid out with ol_document_reserve's or ol_document_new_reserved's room, with
+ * too little, and with none. */
+extern int ol_sort_checks, ol_sort_mismatches;
+
+static unsigned long lcg = 12345;
+static unsigned next_rand(unsigned n)
+{
+    lcg = lcg * 1103515245UL + 12345UL;
+    return (unsigned)((lcg >> 16) % n);
+}
+
+static void test_sort_in_place(void)
+{
+    int round, checks = ol_sort_checks;
+    for (round = 0; round < 40; ++round) {
+        ol_document *doc = round % 4 == 3 ? ol_document_new_reserved(3000) : ol_document_new();
+        ol_page page;
+        ol_style s;
+        ol_box_style box;
+        int i, n = 20 + (int)next_rand(60), pages, p;
+        size_t total = 0, first, count, k;
+        memset(&page, 0, sizeof(page));
+        page.width = OL_CSSPX(200);
+        page.height = OL_CSSPX(100 + next_rand(100));
+        page.margin_top = page.margin_bottom = OL_CSSPX(10);
+        page.margin_left = page.margin_right = OL_CSSPX(10);
+        for (i = 0; i < n; ++i) {
+            unsigned what = next_rand(8);
+            ol_node *b = block(doc, NULL, what == 6 ? OL_ROLE_TABLE : OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+            if (what == 6) {                            /* a table of shaded cells */
+                int r;
+                for (r = 0; r < 1 + (int)next_rand(4); ++r) {
+                    ol_node *row = block(doc, b, OL_ROLE_ROW, OL_ALIGN_START);
+                    ol_node *cell = block(doc, row, OL_ROLE_CELL, OL_ALIGN_START);
+                    ol_style_init(&s);
+                    s.display = OL_DISPLAY_BLOCK;
+                    s.background = 0xffcceeffu;
+                    ol_node_set_style(cell, &s);
+                    ol_box_style_init(&box);
+                    box.border_width = OL_CSSPX(1);
+                    ol_node_set_box(cell, &box);
+                    text(doc, cell, "cell\nrow", OL_CSSPX(16), 0);
+                }
+                continue;
+            }
+            if (what == 7) {                            /* shaded and empty: a fill no page gets */
+                ol_style_init(&s);
+                s.display = OL_DISPLAY_BLOCK;
+                s.background = 0xffeeeeeeu;
+                ol_node_set_style(b, &s);
+                continue;
+            }
+            if (what <= 1) {                            /* shaded and bordered: crosses pages, cut on each */
+                ol_style_init(&s);
+                s.display = OL_DISPLAY_BLOCK;
+                s.background = 0xffddddddu;
+                ol_node_set_style(b, &s);
+                ol_box_style_init(&box);
+                box.border_width = OL_CSSPX(1);
+                ol_node_set_box(b, &box);
+                text(doc, b, "a\nb\nc\nd\ne\nf\ng\nh\ni\nj", OL_CSSPX(16), 0);
+            } else {
+                text(doc, b, what == 2 ? "one two three four five six seven eight nine ten" : "a line", OL_CSSPX(16),
+                     what & 1);
+            }
+            if (what == 3 || what == 4) {               /* a frame on its page, behind or in front */
+                ol_node *f = anchored(doc, b, OL_ANCHOR_X(OL_ANCHOR_PAGE) | OL_ANCHOR_Y(what == 3 ? OL_ANCHOR_PAGE
+                                                                                           : OL_ANCHOR_BLOCK) |
+                                                  (what == 3 ? OL_ANCHOR_BEHIND : 0u),
+                                      OL_CSSPX(next_rand(50)), OL_CSSPX(next_rand(30)), OL_CSSPX(60), OL_CSSPX(40));
+                ol_style_init(&s);
+                s.display = OL_DISPLAY_BLOCK;
+                s.background = 0xff336699u;
+                ol_node_set_style(f, &s);
+                text(doc, f, "box", OL_CSSPX(12), 0);
+            }
+            if (what == 5) {                            /* a page break */
+                ol_box_style_init(&box);
+                box.flags = OL_BOX_PAGE_BREAK_BEFORE;
+                ol_node_set_box(b, &box);
+            }
+        }
+        if (round % 3 == 1) CHECK(ol_document_reserve(doc, 4));       /* too little: it grows as before */
+        if (round % 3 == 2) CHECK(ol_document_reserve(doc, 4000));    /* room enough */
+        CHECK(ol_layout_pages(doc, &page, measure, NULL));
+        pages = ol_page_count(doc);
+        /* every page's ops are its own, and add up */
+        for (p = 0; p < pages; ++p) {
+            CHECK(ol_display_page_range(doc, p, &first, &count));
+            for (k = first; k < first + count; ++k) CHECK(ol_display_get(doc, k)->page == p);
+            total += count;
+        }
+        CHECK(total == ol_display_count(doc));
+        /* and again on the same document: the same */
+        CHECK(ol_layout_pages(doc, &page, measure, NULL) && ol_page_count(doc) == pages);
+        ol_document_free(doc);
+    }
+    CHECK(ol_sort_checks >= checks + 80);
+    CHECK(ol_sort_mismatches == 0);
+}
+
 int main(void)
 {
     test_alignment();
@@ -912,6 +1016,7 @@ int main(void)
     test_scale();
     test_tabs();
     test_aligned_tabs();
+    test_sort_in_place();
     if (failures) {
         printf("OPENLAYOUT DOCUMENT FAIL (%d)\n", failures);
         return 20;

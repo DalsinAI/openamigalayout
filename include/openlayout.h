@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define OL_VERSION "0.4"
+#define OL_VERSION "0.5"
 
 /*
  * OpenLayout logical units are exact across the three worlds we care about:
@@ -184,6 +184,15 @@ typedef struct {
 
 ol_document *ol_document_new(void);
 void ol_document_free(ol_document *doc);
+/* 0.5: room for ops display ops, made now in one block; 1, or 0 when memory runs out. */
+int ol_document_reserve(ol_document *doc, size_t ops);
+/* 0.5: a new document with room for ops display ops, that block taken before any other. A program that lays
+ * a document out again after each change (a new ol_document each time, the last one freed just before) can
+ * give the same room each time, a little more than the last layout's ol_display_count: the display list
+ * then takes back the very block the last one had, and doesn't grow by doubling. On an Amiga libnix's malloc
+ * kept the doubled blocks of a 30-page document's list (3 MB) in its pools after every relayout. NULL when
+ * memory runs out. */
+ol_document *ol_document_new_reserved(size_t ops);
 ol_node *ol_document_root(ol_document *doc);
 const ol_node *ol_document_root_const(const ol_document *doc);
 
