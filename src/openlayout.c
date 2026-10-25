@@ -1933,6 +1933,28 @@ static int anchor_place(const ol_document *doc, const ol_anchor *a, int paged, o
     return p;
 }
 
+int ol_frame_place(const ol_document *doc, const ol_node *frame, int *page, ol_rect *rect)
+{
+    size_t k;
+    if (!doc || !frame || !doc->page_count) return 0;
+    for (k = 0; k < doc->anchor_count; ++k) {
+        const ol_anchor *a = &doc->anchors[k];
+        ol_unit ox, oy;
+        int p;
+        if (a->node != frame) continue;
+        p = anchor_place(doc, a, doc->paged, &ox, &oy);
+        if (page) *page = p;
+        if (rect) {
+            rect->x = ox;
+            rect->y = oy;
+            rect->width = frame->bounds.width;
+            rect->height = frame->bounds.height;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 /* 0.6: a frame's zone, the frame h high, on a page that starts at start in
  * the galley. */
 static void frame_zone(const ol_document *doc, const ol_anchor *a, ol_unit h, ol_unit start, ol_wrap_zone *z)

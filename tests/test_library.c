@@ -337,6 +337,18 @@ int main(void)
                 }
                 CHECK(x == (pass ? page.margin_left : page.margin_left + OL_CSSPX(110)));
             }
+            {   /* where the frame went: the last page, at the margin, 100 x 60 px */
+                struct OLFramePlace place_req;
+                ol_rect where;
+                place_req.document = paged;
+                place_req.frame = frame;
+                place_req.rect = &where;
+                CHECK(OL_FramePlace(&place_req));
+                CHECK(place_req.page == OL_PageCount(paged) - 1 && where.x == page.margin_left &&
+                      where.width == OL_CSSPX(100) && where.height == OL_CSSPX(60));
+                place_req.frame = para;
+                CHECK(!OL_FramePlace(&place_req));
+            }
         }
         printf("LAYOUTLIB PAGES %ld\n", (long)OL_PageCount(paged));
         OL_DocumentFree(paged);

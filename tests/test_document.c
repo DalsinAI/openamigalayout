@@ -1182,6 +1182,16 @@ static void test_wrap_frames(void)
         CHECK(crossing(doc, p, rect(OL_CSSPX(20), fy, OL_CSSPX(360), OL_CSSPX(30)), body, 3) == 0);
     }
 
+    /* where the frames went: the picture at the top left of the body, the box on its page */
+    {
+        ol_rect r;
+        int pg = -1;
+        CHECK(ol_frame_place(doc, f1, &pg, &r) && pg == 0 && r.x == OL_CSSPX(20) && r.y == OL_CSSPX(20) &&
+              r.width == OL_CSSPX(100) && r.height == OL_CSSPX(60));
+        CHECK(ol_frame_place(doc, f3, &pg, &r) && r.width == OL_CSSPX(100) && r.height == OL_CSSPX(30));
+        CHECK(!ol_frame_place(doc, p1, &pg, &r) && !ol_frame_place(NULL, f1, &pg, &r));
+    }
+
     /* the table's cell is where it would be; the frame over it too */
     op = first_text(doc, cellp);
     CHECK(op && op->u.text.bounds.x < OL_CSSPX(40));

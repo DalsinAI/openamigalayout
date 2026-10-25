@@ -5,7 +5,7 @@
  * box style's anchor), with no new calls; version 6 adds
  * OL_DocumentReserve and sorts the display list into its pages where it is
  * (OpenLayout 0.5); version 7 wraps the text round anchored frames (the
- * box style's wrap and wrap_gap, OpenLayout 0.6), with no new calls.
+ * box style's wrap and wrap_gap, OpenLayout 0.6) and adds OL_FramePlace.
  * Programs built for 2 to 6 keep working.
  * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
@@ -97,6 +97,7 @@ static BOOL OL_NodeSetTabs(REG(a0, struct OLNodeTabs *r), REG(a6, struct OpenLay
 static BOOL OL_NodeSetTabStops(REG(a0, struct OLNodeTabStops *r), REG(a6, struct OpenLayoutLibBase *base));
 static BOOL OL_DocumentReserve(REG(a0, struct OLDocumentReserve *r), REG(a6, struct OpenLayoutLibBase *base));
 static ol_document *OL_DocumentNewReserved(REG(d0, ULONG ops), REG(a6, struct OpenLayoutLibBase *base));
+static BOOL OL_FramePlace(REG(a0, struct OLFramePlace *r), REG(a6, struct OpenLayoutLibBase *base));
 
 static const APTR lib_vectors[] = {
     (APTR)lib_open, (APTR)lib_close, (APTR)lib_expunge, (APTR)lib_null,
@@ -121,6 +122,8 @@ static const APTR lib_vectors[] = {
     (APTR)OL_NodeSetTabStops,
     /* version 6 (5 added no call) */
     (APTR)OL_DocumentReserve, (APTR)OL_DocumentNewReserved,
+    /* version 7 */
+    (APTR)OL_FramePlace,
     (APTR)-1
 };
 
@@ -510,4 +513,15 @@ static ol_document *OL_DocumentNewReserved(REG(d0, ULONG ops), REG(a6, struct Op
 {
     (void)base;
     return ol_document_new_reserved((size_t)ops);
+}
+
+/* ---- version 7 ------------------------------------------------------------ */
+
+static BOOL OL_FramePlace(REG(a0, struct OLFramePlace *r), REG(a6, struct OpenLayoutLibBase *base))
+{
+    int page = 0;
+    (void)base;
+    if (!r || !ol_frame_place(r->document, r->frame, &page, r->rect)) return FALSE;
+    r->page = page;
+    return TRUE;
 }

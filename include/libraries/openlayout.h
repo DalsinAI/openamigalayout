@@ -13,7 +13,8 @@
 #define OPENLAYOUTLIB_ANCHOR_VERSION 5      /* frames anchored to their pages: ol_box_style's anchor, whose size
                                                the program sets (OL_BoxStyleInit stops before it) */
 #define OPENLAYOUTLIB_WRAP_VERSION 7        /* text round anchored frames: ol_box_style's wrap and wrap_gap, with
-                                               the size the program sets (OL_BoxStyleInit stops before them) */
+                                               the size the program sets (OL_BoxStyleInit stops before them);
+                                               where a frame went: OL_FramePlace */
 
 struct OLNodeAppend {
     ol_document *document;
@@ -144,6 +145,15 @@ struct OLNodeTabStops {
 struct OLDocumentReserve {
     ol_document *document;
     ULONG ops;
+};
+
+/* version 7 */
+
+struct OLFramePlace {
+    const ol_document *document;
+    const ol_node *frame;
+    LONG page;          /* set by OL_FramePlace, with rect */
+    ol_rect *rect;
 };
 
 

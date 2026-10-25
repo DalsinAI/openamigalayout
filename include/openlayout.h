@@ -342,6 +342,13 @@ enum {
  * openlayout.library 5 and 6 have it */
 #define OL_BOX_STYLE_SIZE_0_5 offsetof(ol_box_style, wrap)
 
+/* 0.6: where an anchored frame went after ol_layout_pages (or ol_layout,
+ * in the galley): its page and its rectangle on it, the frame's width and
+ * its height as laid out. For an editor to find the text box under the
+ * pointer and draw round it. 0 when the node is not an anchored frame that
+ * was laid out. */
+int ol_frame_place(const ol_document *doc, const ol_node *frame, int *page, ol_rect *rect);
+
 void ol_box_style_init(ol_box_style *box);
 /* Copies box->size bytes at most, so a smaller older ol_box_style works. */
 void ol_node_set_box(ol_node *node, const ol_box_style *box);

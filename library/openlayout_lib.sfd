@@ -60,4 +60,6 @@ BOOL OL_NodeSetTabStops(struct OLNodeTabStops *req)(a0)
 * version 6: the display list's room at once (OpenLayout 0.5)
 BOOL OL_DocumentReserve(struct OLDocumentReserve *req)(a0)
 ol_document *OL_DocumentNewReserved(ULONG ops)(d0)
+* version 7: text round frames (OpenLayout 0.6), and where a frame went
+BOOL OL_FramePlace(struct OLFramePlace *req)(a0)
 ==end
