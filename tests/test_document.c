@@ -1393,6 +1393,53 @@ static void test_wrap_random(void)
     CHECK(settled >= 50);
 }
 
+/* 0.7: a block's lines exactly its line height, though its text is taller (OL_BOX_EXACT_LINES); without it the
+ * line height is the least a line is */
+static void test_exact_lines(void)
+{
+    ol_document *doc = ol_document_new();
+    ol_node *exact, *least, *te, *tl;
+    ol_style s;
+    ol_box_style box;
+    const ol_display_op *ops[16];
+    size_t n, i;
+    exact = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    s = *ol_node_style(exact);
+    s.line_height = OL_CSSPX(10);
+    ol_node_set_style(exact, &s);
+    ol_box_style_init(&box);
+    box.flags = OL_BOX_EXACT_LINES;
+    ol_node_set_box(exact, &box);
+    te = text(doc, exact, "aaa bbb ccc ddd eee fff ggg hhh", OL_CSSPX(16), 0);
+    least = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    s = *ol_node_style(least);
+    s.line_height = OL_CSSPX(30);
+    ol_node_set_style(least, &s);
+    tl = text(doc, least, "aaa bbb ccc ddd eee fff ggg hhh", OL_CSSPX(16), 0);
+    s = *ol_node_style(tl);
+    s.line_height = OL_CSSPX(30);                /* a line is at least its runs' line height */
+    ol_node_set_style(tl, &s);
+    /* the text's own line height under the exact one, so that only the flag makes them 10 px */
+    s = *ol_node_style(te);
+    s.line_height = OL_CSSPX(10);
+    ol_node_set_style(te, &s);
+    CHECK(ol_layout(doc, OL_CSSPX(120), measure, NULL));
+    n = text_ops(doc, ol_node_id(te), ops, 16);
+    CHECK(n == 8);
+    /* 15 characters a line: two lines 10 px apart, the text standing on each line's bottom (4 px of descent) */
+    for (i = 0; i < n; ++i) {
+        ol_unit row = ops[i]->u.text.bounds.y / OL_CSSPX(10);
+        CHECK(ops[i]->u.text.bounds.y == row * OL_CSSPX(10) && ops[i]->u.text.bounds.height == OL_CSSPX(10));
+        CHECK(ops[i]->u.text.baseline == ops[i]->u.text.bounds.y + OL_CSSPX(10) - OL_CSSPX(4));
+    }
+    CHECK(ops[n - 1]->u.text.bounds.y == OL_CSSPX(10));
+    /* at least 30 px: the second paragraph's two lines are 30 px, its text 16, after the first's 20 */
+    n = text_ops(doc, ol_node_id(tl), ops, 16);
+    CHECK(n == 8 && ops[0]->u.text.bounds.y == OL_CSSPX(20) && ops[0]->u.text.bounds.height == OL_CSSPX(30) &&
+          ops[n - 1]->u.text.bounds.y == OL_CSSPX(50));
+    ol_document_free(doc);
+}
+
 int main(void)
 {
     test_alignment();
@@ -1411,6 +1458,7 @@ int main(void)
     test_wrap_frames();
     test_wrap_pages();
     test_wrap_random();
+    test_exact_lines();
     if (failures) {
         printf("OPENLAYOUT DOCUMENT FAIL (%d)\n", failures);
         return 20;

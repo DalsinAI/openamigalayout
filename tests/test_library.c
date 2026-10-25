@@ -350,6 +350,56 @@ int main(void)
                 CHECK(!OL_FramePlace(&place_req));
             }
         }
+        if (OpenLayoutBase->lib_Version > OPENLAYOUTLIB_WRAP_VERSION ||
+            (OpenLayoutBase->lib_Version == OPENLAYOUTLIB_WRAP_VERSION &&
+             OpenLayoutBase->lib_Revision >= OPENLAYOUTLIB_EXACT_REVISION)) {
+            /* 7.1: a paragraph's lines exactly 8 px apart, though its 16 px text is taller */
+            ol_document *ex = OL_DocumentNew();
+            struct OLLayoutRequest ex_req;
+            ol_node *para, *words;
+            ol_box_style eb;
+            ULONG k, n, lines = 0;
+            CHECK(ex != NULL);
+            append.document = ex;
+            append.parent = OL_DocumentRoot(ex);
+            append.role = OL_ROLE_PARAGRAPH;
+            append.text = NULL;
+            para = OL_NodeAppend(&append);
+            OL_StyleInit(&style);
+            style.line_height = OL_CSSPX(8);
+            style_req.node = para;
+            style_req.style = &style;
+            OL_NodeSetStyle(&style_req);
+            OL_BoxStyleInit(&eb);
+            eb.flags = OL_BOX_EXACT_LINES;
+            box_req.node = para;
+            box_req.box = &eb;
+            OL_NodeSetBox(&box_req);
+            append.parent = para;
+            append.role = OL_ROLE_TEXT;
+            append.text = (CONST_STRPTR)"Lines exactly eight pixels apart, whatever the size of their text.";
+            words = OL_NodeAppend(&append);
+            OL_StyleInit(&style);
+            style.display = OL_DISPLAY_INLINE;
+            style.line_height = OL_CSSPX(8);
+            style_req.node = words;
+            OL_NodeSetStyle(&style_req);
+            ex_req.document = ex;
+            ex_req.viewport_width = OL_CSSPX(120);
+            ex_req.measure = NULL;
+            ex_req.measure_userdata = NULL;
+            CHECK(OL_Layout(&ex_req));
+            n = OL_DisplayCount(ex);
+            for (k = 0; k < n; ++k) {
+                const ol_display_op *op = OL_DisplayGet(ex, k);
+                if (op->type != OL_OP_TEXT) continue;
+                CHECK(op->u.text.bounds.height == OL_CSSPX(8) && op->u.text.bounds.y % OL_CSSPX(8) == 0);
+                if (op->u.text.bounds.y / OL_CSSPX(8) + 1 > (ol_unit)lines) lines = (ULONG)(op->u.text.bounds.y / OL_CSSPX(8) + 1);
+            }
+            CHECK(lines >= 2 && OL_DocumentContentHeight(ex) == (LONG)lines * OL_CSSPX(8));
+            OL_DocumentFree(ex);
+            append.document = paged;
+        }
         printf("LAYOUTLIB PAGES %ld\n", (long)OL_PageCount(paged));
         OL_DocumentFree(paged);
     }
