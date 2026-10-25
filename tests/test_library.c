@@ -276,6 +276,12 @@ int main(void)
             CHECK(OL_PageCount(paged) == pages);
             reserve_req.document = NULL;
             CHECK(!OL_DocumentReserve(&reserve_req));
+            {
+                ol_document *roomy = OL_DocumentNewReserved(1000);
+                CHECK(roomy != NULL);
+                CHECK(OL_DisplayCount(roomy) == 0);
+                OL_DocumentFree(roomy);
+            }
         }
         printf("LAYOUTLIB PAGES %ld\n", (long)OL_PageCount(paged));
         OL_DocumentFree(paged);

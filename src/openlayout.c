@@ -248,6 +248,26 @@ void ol_style_init(ol_style *style)
     style->background = 0x00000000u;
 }
 
+ol_document *ol_document_new_reserved(size_t ops)
+{
+    /* the display list's block first, before the document's own small ones: on an Amiga the block a document
+     * laid out just before freed is still whole then, and takes it (libnix's malloc carves small blocks out
+     * of the first free space it finds) */
+    ol_display_op *list = ops ? (ol_display_op *)malloc(ops * sizeof(*list)) : NULL;
+    ol_document *doc;
+    if (ops && !list) return NULL;
+    doc = ol_document_new();
+    if (!doc) {
+        free(list);
+        return NULL;
+    }
+    if (list) {
+        doc->ops = list;
+        doc->op_capacity = ops;
+    }
+    return doc;
+}
+
 ol_document *ol_document_new(void)
 {
     ol_document *doc = (ol_document *)calloc(1, sizeof(*doc));

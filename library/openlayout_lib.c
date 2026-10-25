@@ -94,6 +94,7 @@ static ULONG OL_DrawPage(REG(a0, struct OLDrawPage *r), REG(a6, struct OpenLayou
 static BOOL OL_NodeSetTabs(REG(a0, struct OLNodeTabs *r), REG(a6, struct OpenLayoutLibBase *base));
 static BOOL OL_NodeSetTabStops(REG(a0, struct OLNodeTabStops *r), REG(a6, struct OpenLayoutLibBase *base));
 static BOOL OL_DocumentReserve(REG(a0, struct OLDocumentReserve *r), REG(a6, struct OpenLayoutLibBase *base));
+static ol_document *OL_DocumentNewReserved(REG(d0, ULONG ops), REG(a6, struct OpenLayoutLibBase *base));
 
 static const APTR lib_vectors[] = {
     (APTR)lib_open, (APTR)lib_close, (APTR)lib_expunge, (APTR)lib_null,
@@ -117,7 +118,7 @@ static const APTR lib_vectors[] = {
     /* version 4 */
     (APTR)OL_NodeSetTabStops,
     /* version 6 (5 added no call) */
-    (APTR)OL_DocumentReserve,
+    (APTR)OL_DocumentReserve, (APTR)OL_DocumentNewReserved,
     (APTR)-1
 };
 
@@ -500,4 +501,10 @@ static BOOL OL_DocumentReserve(REG(a0, struct OLDocumentReserve *r), REG(a6, str
 {
     (void)base;
     return r && ol_document_reserve(r->document, (size_t)r->ops) ? TRUE : FALSE;
+}
+
+static ol_document *OL_DocumentNewReserved(REG(d0, ULONG ops), REG(a6, struct OpenLayoutLibBase *base))
+{
+    (void)base;
+    return ol_document_new_reserved((size_t)ops);
 }

@@ -901,7 +901,8 @@ static void test_aligned_tabs(void)
 /* 0.5: the display list sorted into its pages where it is (and no second array): the same as 0.4's copy
  * (OL_CHECK_SORT, which make test builds with, compares every sort with it), on documents with what moves
  * ops about: shaded blocks and table rows crossing pages (on each page, cut), frames behind and in front
- * on their pages, empty pages; laid out with ol_document_reserve's room, with too little, and with none. */
+ * on their pages, empty pages; laid out with ol_document_reserve's or ol_document_new_reserved's room, with
+ * too little, and with none. */
 extern int ol_sort_checks, ol_sort_mismatches;
 
 static unsigned long lcg = 12345;
@@ -915,7 +916,7 @@ static void test_sort_in_place(void)
 {
     int round, checks = ol_sort_checks;
     for (round = 0; round < 40; ++round) {
-        ol_document *doc = ol_document_new();
+        ol_document *doc = round % 4 == 3 ? ol_document_new_reserved(3000) : ol_document_new();
         ol_page page;
         ol_style s;
         ol_box_style box;
