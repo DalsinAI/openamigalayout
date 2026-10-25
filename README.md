@@ -84,13 +84,21 @@ takes one block of about that size before the nodes' small ones, and doesn't gro
 sorted where the list is, not copied into a second one. On an Amiga, libnix's malloc kept the doubled and
 copied blocks of a 30-page document (3 MB) in its pools after every relayout.
 
+Text goes round a frame anchored to its page when the frame's `ol_box_style` has a `wrap` (0.6):
+`OL_WRAP_SQUARE` puts the body's lines beside it, on either side with room (at least `OL_WRAP_MIN`),
+`OL_WRAP_TOP_BOTTOM` above and below it, both `wrap_gap` from its edges. A frame's zone is worked out where
+its paragraph starts, on the page that paragraph's first line is on (from the pages cut so far), so the
+lines after it wrap round it in the same pass; a frame placed above its paragraph, or one that moves the
+page it is on, takes another pass (at most `OL_WRAP_PASSES` in all). A document with nothing to wrap round
+is laid out once, as before. Lines in table cells and in frames do not wrap.
+
 Resident Amiga library and ABI test:
 
 ```sh
 ./build-library.sh
 ```
 
-The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup. The current ABI is `openlayout.library` 6.0. Version 2 added the node inspection vectors required by shared renderers and automation; version 3 adds the document calls (pages, tables, frames, tab stops, the caret, the display scale and `OL_DrawPage`) after them, so programs built for version 2 keep working; version 4 adds `OL_NodeSetTabStops` after those; version 5 places frames anchored to their pages (`box.anchor`, OpenLayout 0.4) with no new calls; version 6 adds `OL_DocumentReserve` (OpenLayout 0.5). A program that uses the document calls opens `OPENLAYOUTLIB_DOCUMENT_VERSION` (3), one that sets aligned tab stops `OPENLAYOUTLIB_TABSTOP_VERSION` (4), one that anchors frames `OPENLAYOUTLIB_ANCHOR_VERSION` (5), and one that reserves the display list's room `OPENLAYOUTLIB_RESERVE_VERSION` (6). The library's `OL_BoxStyleInit` fills only the `ol_box_style` that programs built for 3 and 4 have (`OL_BOX_STYLE_SIZE_0_3` bytes), so it never writes past theirs; a program that anchors a frame then sets `size` to `sizeof(ol_box_style)` and `anchor`.
+The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup. The current ABI is `openlayout.library` 7.0. Version 2 added the node inspection vectors required by shared renderers and automation; version 3 adds the document calls (pages, tables, frames, tab stops, the caret, the display scale and `OL_DrawPage`) after them, so programs built for version 2 keep working; version 4 adds `OL_NodeSetTabStops` after those; version 5 places frames anchored to their pages (`box.anchor`, OpenLayout 0.4) with no new calls; version 6 adds `OL_DocumentReserve` (OpenLayout 0.5); version 7 wraps text round anchored frames (`box.wrap`, OpenLayout 0.6) with no new calls. A program that uses the document calls opens `OPENLAYOUTLIB_DOCUMENT_VERSION` (3), one that sets aligned tab stops `OPENLAYOUTLIB_TABSTOP_VERSION` (4), one that anchors frames `OPENLAYOUTLIB_ANCHOR_VERSION` (5), one that reserves the display list's room `OPENLAYOUTLIB_RESERVE_VERSION` (6), and one that wraps text round frames `OPENLAYOUTLIB_WRAP_VERSION` (7). The library's `OL_BoxStyleInit` fills only the `ol_box_style` that programs built for 3 and 4 have (`OL_BOX_STYLE_SIZE_0_3` bytes), so it never writes past theirs; a program that anchors a frame then sets `size` to `sizeof(ol_box_style)` and `anchor` (and `wrap` and `wrap_gap`).
 
 The OS 3.2.3 / AC090 68040 qualification opens the library from `LIBS:` and runs both the normal ABI test and a 48-node stress test covering allocation growth, metadata, image nodes, layout and display-list access.
 

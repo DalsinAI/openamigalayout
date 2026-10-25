@@ -1,10 +1,12 @@
-/* openlayout.library 6.0: version 3 adds pages, tables, frames and the
+/* openlayout.library 7.0: version 3 adds pages, tables, frames and the
  * caret (OpenLayout 0.2) after version 2's calls, which are unchanged;
  * version 4 adds tab stops that align and their leaders (OpenLayout 0.3);
  * version 5 places frames anchored to their pages (OpenLayout 0.4, the
  * box style's anchor), with no new calls; version 6 adds
  * OL_DocumentReserve and sorts the display list into its pages where it is
- * (OpenLayout 0.5). Programs built for 2 to 5 keep working.
+ * (OpenLayout 0.5); version 7 wraps the text round anchored frames (the
+ * box style's wrap and wrap_gap, OpenLayout 0.6), with no new calls.
+ * Programs built for 2 to 6 keep working.
  * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
 #include <exec/types.h>
@@ -18,7 +20,7 @@
 #include "../include/libraries/openlayout.h"
 
 #define REG(r, decl) register decl __asm(#r)
-#define LIB_VERSION 6
+#define LIB_VERSION 7
 #define LIB_REVISION 0
 
 struct OpenLayoutLibBase {
@@ -32,10 +34,10 @@ int start(void) { return -1; }
 
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
-    "openlayout.library 6.0 (25.10.2026) OpenLayout 0.5, AmigaChrome Team\r\n";
+    "openlayout.library 7.0 (25.10.2026) OpenLayout 0.6, AmigaChrome Team\r\n";
 /* for Version and the file's version tag: lib_id has none */
 static const char lib_ver[] __attribute__((used)) =
-    "$VER: openlayout.library 6.0 (25.10.2026) OpenLayout 0.5, AmigaChrome Team";
+    "$VER: openlayout.library 7.0 (25.10.2026) OpenLayout 0.6, AmigaChrome Team";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),
@@ -368,7 +370,8 @@ static CONST_STRPTR OL_NodeValue(REG(a0, const ol_node *node), REG(a6, struct Op
 /* ---- version 3 ------------------------------------------------------------ */
 
 /* 5.0: only the box style programs built for 3 and 4 have, so this never writes past theirs; a program
- * that anchors a frame sets size to sizeof(ol_box_style) and anchor after it */
+ * that anchors a frame (or, with 7.0, wraps text round it) sets size to sizeof(ol_box_style) and the
+ * fields after it */
 static void OL_BoxStyleInit(REG(a0, ol_box_style *box), REG(a6, struct OpenLayoutLibBase *base))
 {
     ol_box_style full;

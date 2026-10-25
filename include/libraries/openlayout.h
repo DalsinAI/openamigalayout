@@ -12,6 +12,8 @@
 #define OPENLAYOUTLIB_RESERVE_VERSION 6     /* the display list's room at once: OL_DocumentReserve, OL_DocumentNewReserved */
 #define OPENLAYOUTLIB_ANCHOR_VERSION 5      /* frames anchored to their pages: ol_box_style's anchor, whose size
                                                the program sets (OL_BoxStyleInit stops before it) */
+#define OPENLAYOUTLIB_WRAP_VERSION 7        /* text round anchored frames: ol_box_style's wrap and wrap_gap, with
+                                               the size the program sets (OL_BoxStyleInit stops before them) */
 
 struct OLNodeAppend {
     ol_document *document;

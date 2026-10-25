@@ -48,7 +48,33 @@ typedef struct {
     ol_unit x, y;             /* its containing block's content corner, in the galley */
     ol_rect frame;
     uint32_t anchor;
+    const ol_node *node;      /* 0.6: the frame, for its wrap and its laid out size */
+    ol_unit line_y;           /* 0.6: its block's first line (or its corner), whose page a wrapped frame goes on */
+    int page;                 /* 0.6: a wrapped frame's page, once the pages are cut; -1: the corner's */
 } ol_anchor;
+
+/* 0.6: where the body's lines keep away from a frame they wrap round
+ * (its wrap gaps included), in the galley: x0 to x1 across, y0 to y1 down;
+ * only the lines of its page meet it, those from page_top on that fit
+ * above page_bottom (its page's body) with no page break before them. */
+typedef struct {
+    const ol_node *node;      /* the frame */
+    ol_unit x0, y0, x1, y1;
+    ol_unit page_top, page_bottom;
+    ol_unit h;                /* the frame's height, as laid out */
+    int page;                 /* its page */
+    uint32_t wrap;            /* OL_WRAP_SQUARE or OL_WRAP_TOP_BOTTOM */
+    /* out of zone_same: */
+    ol_unit line_dy;          /* how far below its block's corner the block's first line went (the last pass's) */
+    int after;                /* down from its block, and below its corner: it meets no line before its block */
+    int live;                 /* worked out in this pass (an after zone is used only then) */
+} ol_wrap_zone;
+
+/* Whether two zones are the same, but for line_dy. */
+static int zone_same(const ol_wrap_zone *a, const ol_wrap_zone *b)
+{
+    return !memcmp(a, b, offsetof(ol_wrap_zone, line_dy));
+}
 
 struct ol_document {
     ol_node *root;
@@ -76,6 +102,19 @@ struct ol_document {
     size_t anchor_count;
     size_t anchor_capacity;
     int anchor_depth;         /* laying out an anchored frame */
+    /* 0.6: the zones this pass's lines wrap round: the last pass's, each
+     * worked out again where its paragraph starts in this one (on the
+     * pages cut so far, live_starts); and the next pass's, from this one's */
+    ol_wrap_zone *zones;
+    size_t zone_count, zone_capacity;
+    ol_wrap_zone *next_zones;
+    size_t next_capacity;
+    int wrap_off;             /* in a table or a frame: its lines do not wrap */
+    int paging;               /* ol_layout_pages: frames go on pages */
+    int zones_moved;          /* a zone moved where lines before its paragraph met it */
+    ol_unit body_height;
+    ol_unit *live_starts;     /* the pages cut so far in this pass: where each starts */
+    int live_count, live_capacity;
 
     /* pages: one after ol_layout, page 0 being the whole galley */
     int paged;
@@ -113,6 +152,15 @@ typedef struct {
     ol_text_align align;
     int has_content;
     int lines;
+    /* 0.6: wrapping round frames. right is the end of the stretch of the
+     * line being filled; the column ends at col_right. */
+    int wraps;                /* the body's: its lines wrap round the zones (not a cell's or a frame's) */
+    int room_pending;         /* the line's stretch is worked out when its first piece comes */
+    int narrow;               /* the stretch is cut short by a zone */
+    ol_unit col_right;
+    ol_unit line_base;        /* where the line starts without zones (x0, or the first line's indent) */
+    ol_unit nominal;          /* the height a line is taken to be, to find the zones it meets */
+    ol_unit seg_height;       /* the tallest stretch finished on this line */
 } ol_inline_flow;
 
 static char *ol_strdup0(const char *s)
@@ -319,6 +367,9 @@ void ol_document_free(ol_document *doc)
     free(doc->keeps);
     free(doc->breaks);
     free(doc->anchors);
+    free(doc->zones);
+    free(doc->next_zones);
+    free(doc->live_starts);
     free(doc->page_start);
     free(doc->page_end);
     free(doc->page_first);
@@ -758,6 +809,133 @@ static int piece_fits(const ol_inline_flow *flow, ol_unit width)
     return end <= limit;
 }
 
+static int live_page(ol_document *doc, ol_unit y, ol_unit h);
+
+/* 0.6: whether a line from top to bottom is on a zone's page (from its
+ * top, inside its body, with no page break before it) and meets it. */
+static int zone_meets(const ol_document *doc, const ol_wrap_zone *z, ol_unit top, ol_unit bottom)
+{
+    size_t i;
+    if (z->y0 >= bottom || z->y1 <= top || top < z->page_top || bottom > z->page_bottom || (z->after && !z->live))
+        return 0;
+    for (i = doc->break_count; i > 0; --i) {   /* the breaks come in order, mostly */
+        ol_unit b = doc->breaks[i - 1];
+        if (b > z->page_top && b <= top) return 0;
+        if (b <= z->page_top) break;
+    }
+    return 1;
+}
+
+/* 0.6: the first stretch of the line, at from or right of it, that no
+ * square zone covers and that is wide enough (OL_WRAP_MIN, or the whole
+ * column when that is narrower): *left to *right, and *narrow when a zone
+ * cuts it short. 0 when there is none; *below is then where the zones
+ * crossing the line end first. The line is taken to be its nominal height. */
+static int free_stretch(const ol_inline_flow *flow, ol_unit from, ol_unit *left, ol_unit *right,
+                        ol_unit *below, int *narrow)
+{
+    const ol_document *doc = flow->doc;
+    ol_unit top = flow->line_top, bottom = top + flow->nominal;
+    ol_unit lo = flow->line_base < flow->x0 ? flow->line_base : flow->x0, hi = flow->col_right;
+    ol_unit at = lo, need = hi - (from > lo ? from : lo);
+    size_t i;
+    int moved, crossed = 0;
+
+    if (need > OL_WRAP_MIN) need = OL_WRAP_MIN;
+    if (need < 1) need = 1;
+    *below = bottom;
+    for (i = 0; i < doc->zone_count; ++i) {
+        const ol_wrap_zone *z = &doc->zones[i];
+        if (z->wrap != OL_WRAP_SQUARE || z->x1 <= lo || z->x0 >= hi || !zone_meets(doc, z, top, bottom)) continue;
+        if (!crossed || z->y1 < *below) *below = z->y1;
+        crossed = 1;
+    }
+    for (;;) {
+        ol_unit end = hi, start;
+        do {                                /* past the zones covering at */
+            moved = 0;
+            for (i = 0; crossed && i < doc->zone_count; ++i) {
+                const ol_wrap_zone *z = &doc->zones[i];
+                if (z->wrap != OL_WRAP_SQUARE || !zone_meets(doc, z, top, bottom)) continue;
+                if (z->x0 <= at && z->x1 > at) {
+                    at = z->x1;
+                    moved = 1;
+                }
+            }
+        } while (moved);
+        if (at >= hi) return 0;
+        for (i = 0; crossed && i < doc->zone_count; ++i) {
+            const ol_wrap_zone *z = &doc->zones[i];
+            if (z->wrap == OL_WRAP_SQUARE && z->x0 > at && z->x0 < end && zone_meets(doc, z, top, bottom))
+                end = z->x0;
+        }
+        start = at > from ? at : from;
+        if (end - start >= need) {
+            *left = start;
+            *right = end;
+            *narrow = at != lo || end != hi;
+            return 1;
+        }
+        at = end;
+    }
+}
+
+/* 0.6: the line's room, when its first piece comes, the line having been
+ * at from: below the top and bottom zones that cross it, and in the first
+ * stretch the square ones leave, or below them when they leave none wide
+ * enough. A line moved down leaves a keep where it was on the page it ends
+ * on, so that the page is cut, and starts, as if it were still there: a
+ * page whose first line goes below a frame at its top still starts above
+ * the frame. 0 when there is no memory. */
+static int line_room_from(ol_inline_flow *flow, ol_unit from)
+{
+    ol_document *doc = flow->doc;
+    ol_unit lo = flow->line_base < flow->x0 ? flow->line_base : flow->x0;
+    ol_unit left, right, below, ghost = from;
+    size_t i, guard;
+    int narrow, page = 0;
+
+    flow->room_pending = 0;
+    if (!flow->wraps || !doc->zone_count) return 1;
+    if (doc->paging && (page = live_page(doc, from, flow->nominal)) < 0) return 0;
+    for (guard = 0; guard <= 2 * doc->zone_count + 2; ++guard) {
+        ol_unit top = flow->line_top, bottom = top + flow->nominal;
+        int pushed = 0;
+        if (doc->paging && top != from) {     /* moved onto another page: its zones follow it */
+            int p = live_page(doc, top, flow->nominal);
+            if (p < 0) return 0;
+            if (p != page) {
+                page = p;
+                ghost = top;
+            }
+        }
+        for (i = 0; i < doc->zone_count; ++i) {
+            const ol_wrap_zone *z = &doc->zones[i];
+            if (z->wrap == OL_WRAP_TOP_BOTTOM && z->x1 > lo && z->x0 < flow->col_right &&
+                zone_meets(doc, z, top, bottom)) {
+                flow->line_top = z->y1;
+                pushed = 1;
+            }
+        }
+        if (pushed) continue;
+        if (free_stretch(flow, flow->line_base, &left, &right, &below, &narrow)) {
+            flow->cursor_x = left;
+            flow->content_right = left;
+            flow->right = right;
+            flow->narrow = narrow;
+            break;
+        }
+        if (below <= flow->line_top) break;
+        flow->line_top = below;
+    }
+    return flow->line_top == ghost || add_keep(doc, ghost, ghost + flow->nominal);
+}
+
+static int line_room(ol_inline_flow *flow)
+{
+    return line_room_from(flow, flow->line_top);
+}
+
 /* Ends the flow's line: aligns it, puts its pieces on one baseline (a
  * picture stands on it), and keeps it whole on a page. last: a paragraph's
  * last line, or one ended by a line break, which justification leaves. */
@@ -824,38 +1002,84 @@ static void start_flow(ol_inline_flow *flow, ol_document *doc, const ol_node *bl
     flow->measure_userdata = measure_userdata;
     flow->x0 = x0;
     flow->right = right;
+    flow->col_right = right;
     if (block) {
         flow->tabs = block->tabs;
         flow->tab_info = block->tab_info;
         flow->tab_count = block->tab_count;
     }
     flow->cursor_x = x0 + indent;
+    flow->line_base = flow->cursor_x;
     flow->content_right = flow->cursor_x;
     flow->line_top = top;
     flow->align = align;
     flow->line_first_op = doc->op_count;
+    flow->wraps = !doc->wrap_off;
+    flow->room_pending = flow->wraps;
+    flow->nominal = block && block->style.line_height > 0 ? block->style.line_height
+                  : block && block->style.font_size > 0 ? block->style.font_size + block->style.font_size / 4
+                  : OL_CSSPX(20);
 }
 
-static int flow_newline(ol_inline_flow *flow, int last)
+/* A stretch's or a line's own state, from left to right. */
+static void start_stretch(ol_inline_flow *flow, ol_unit left, ol_unit right, int narrow)
 {
-    if (!finish_line(flow, last)) return 0;
-    flow->line_top += flow->line_height > 0 ? flow->line_height : OL_CSSPX(20);
-    flow->cursor_x = flow->x0;
-    flow->content_right = flow->x0;
+    flow->cursor_x = left;
+    flow->content_right = left;
+    flow->right = right;
+    flow->narrow = narrow;
     flow->line_height = 0;
     flow->ascent = 0;
     flow->descent = 0;
     flow->has_content = 0;
     flow->line_aligned_tab = 0;
     flow->line_first_op = flow->doc->op_count;
+}
+
+static int flow_newline(ol_inline_flow *flow, int last)
+{
+    ol_unit h;
+    if (!finish_line(flow, last)) return 0;
+    h = flow->line_height;
+    if (flow->seg_height > h) h = flow->seg_height;      /* 0.6: a stretch beside a frame was taller */
+    flow->line_top += h > 0 ? h : OL_CSSPX(20);
+    flow->seg_height = 0;
+    flow->line_base = flow->x0;
+    start_stretch(flow, flow->x0, flow->col_right, 0);
+    flow->room_pending = flow->wraps;
     return 1;
+}
+
+/* 0.6: on from a stretch that has no room for the next piece: to the next
+ * stretch of the line beside a frame, below the frame when nothing is on
+ * the line yet, or to a new line. */
+static int flow_wrap_on(ol_inline_flow *flow, int last)
+{
+    ol_unit left, right, below = 0;
+    int narrow;
+    if (flow->wraps && flow->doc->zone_count && free_stretch(flow, flow->right, &left, &right, &below, &narrow)) {
+        if (!finish_line(flow, last)) return 0;
+        if (flow->has_content && flow->line_height > flow->seg_height) flow->seg_height = flow->line_height;
+        start_stretch(flow, left, right, narrow);
+        return 1;
+    }
+    if (flow->narrow && !flow->has_content && !flow->seg_height && below > flow->line_top) {
+        ol_unit was = flow->line_top;
+        flow->line_top = below;
+        return line_room_from(flow, was);
+    }
+    if (!flow_newline(flow, last)) return 0;
+    return !flow->room_pending || line_room(flow);
 }
 
 /* Ends the flow; *bottom is below its last line. */
 static int flush_flow(ol_inline_flow *flow, ol_unit *bottom)
 {
+    ol_unit h;
     if (!finish_line(flow, 1)) return 0;
-    *bottom = flow->line_top + (flow->has_content ? flow->line_height : 0);
+    h = flow->has_content ? flow->line_height : 0;
+    if (flow->seg_height > h) h = flow->seg_height;
+    *bottom = flow->line_top + h;
     return 1;
 }
 
@@ -881,9 +1105,11 @@ static int emit_text_piece(ol_inline_flow *flow, ol_node *node,
         word_width = word.width;
     }
 
-    /* a word wraps when it does not fit; its trailing spaces may hang */
-    if (flow->has_content && word_length && !piece_fits(flow, word_width))
-        if (!flow_newline(flow, 0)) return 0;
+    /* a word wraps when it does not fit; its trailing spaces may hang. 0.6: on to the line's next stretch
+     * beside a frame, and below a stretch too narrow for it */
+    if (flow->room_pending && !line_room(flow)) return 0;
+    while (word_length && !piece_fits(flow, word_width) && (flow->has_content || flow->narrow))
+        if (!flow_wrap_on(flow, 0)) return 0;
 
     op = append_op(flow->doc, OL_OP_TEXT);
     if (!op) return 0;
@@ -934,13 +1160,14 @@ static int emit_tab(ol_inline_flow *flow, ol_node *node, size_t offset)
     int align;
 
     resolve_tab(flow);                      /* the text after the last tab ends here */
+    if (flow->room_pending && !line_room(flow)) return 0;
     to = next_tab(flow, &info);
     align = (int)(info & 15u);
     if (align == OL_TAB_LEFT) {
         if (to > flow->right && flow->has_content) {
             /* the line ends here as at a line break: not widened to the edge (a justified contents line
              * whose stop is past the edge was spread across the line before its page number) */
-            if (!flow_newline(flow, 1)) return 0;
+            if (!flow_wrap_on(flow, 1)) return 0;
             to = next_tab(flow, &info);
             align = (int)(info & 15u);
         }
@@ -1017,8 +1244,9 @@ static int layout_inline_image(ol_inline_flow *flow, ol_node *node)
     ol_unit h = node->image_height > 0 ? node->image_height : OL_CSSPX(16);
     ol_display_op *op;
 
-    if (flow->has_content && !piece_fits(flow, w))
-        if (!flow_newline(flow, 0)) return 0;
+    if (flow->room_pending && !line_room(flow)) return 0;
+    while (!piece_fits(flow, w) && (flow->has_content || flow->narrow))
+        if (!flow_wrap_on(flow, 0)) return 0;
 
     op = append_op(flow->doc, OL_OP_IMAGE);
     if (!op) return 0;
@@ -1115,6 +1343,7 @@ static int layout_block(ol_document *doc, ol_node *node,
                         ol_unit x, ol_unit y, ol_unit width,
                         ol_measure_text_fn measure, void *measure_userdata,
                         ol_unit *bottom_out);
+static void zones_live(ol_document *doc, const ol_node *block, ol_unit cx, ol_unit cy);
 
 static int is_frame(const ol_node *node)
 {
@@ -1125,7 +1354,7 @@ static int is_frame(const ol_node *node)
  * corner); anchored to its page, at 0, 0 on its own, to be placed when the
  * pages are known, and leaving no keeps or breaks behind (one inside
  * another is laid out where the outer one is). */
-static int layout_frame(ol_document *doc, ol_node *node, ol_unit origin_x, ol_unit origin_y,
+static int layout_frame(ol_document *doc, ol_node *node, ol_unit origin_x, ol_unit origin_y, ol_unit line_y,
                         ol_measure_text_fn measure, void *measure_userdata)
 {
     ol_unit bottom;
@@ -1133,9 +1362,13 @@ static int layout_frame(ol_document *doc, ol_node *node, ol_unit origin_x, ol_un
     size_t keeps, breaks, first;
     ol_anchor *a;
     int ok;
-    if (!node->box.anchor || doc->anchor_depth)
-        return layout_block(doc, node, origin_x + node->box.frame.x, origin_y + node->box.frame.y,
-                            w, measure, measure_userdata, &bottom);
+    if (!node->box.anchor || doc->anchor_depth) {
+        ++doc->wrap_off;                    /* a frame's own lines do not wrap round frames */
+        ok = layout_block(doc, node, origin_x + node->box.frame.x, origin_y + node->box.frame.y,
+                          w, measure, measure_userdata, &bottom);
+        --doc->wrap_off;
+        return ok;
+    }
     if (doc->anchor_count == doc->anchor_capacity) {
         size_t cap = doc->anchor_capacity ? doc->anchor_capacity * 2 : 8;
         ol_anchor *p = (ol_anchor *)realloc(doc->anchors, cap * sizeof(*p));
@@ -1147,7 +1380,9 @@ static int layout_frame(ol_document *doc, ol_node *node, ol_unit origin_x, ol_un
     breaks = doc->break_count;
     first = doc->op_count;
     ++doc->anchor_depth;
+    ++doc->wrap_off;
     ok = layout_block(doc, node, 0, 0, w, measure, measure_userdata, &bottom);
+    --doc->wrap_off;
     --doc->anchor_depth;
     doc->keep_count = keeps;
     doc->break_count = breaks;
@@ -1159,6 +1394,9 @@ static int layout_frame(ol_document *doc, ol_node *node, ol_unit origin_x, ol_un
     a->y = origin_y;
     a->frame = node->box.frame;
     a->anchor = node->box.anchor;
+    a->node = node;
+    a->line_y = line_y;
+    a->page = -1;
     return 1;
 }
 
@@ -1281,12 +1519,14 @@ static int layout_block(ol_document *doc, ol_node *node,
     int has_keep_with_next = 0;
     ol_node *child;
     ol_inline_flow flow;
-    size_t background_index = (size_t)-1;
+    size_t background_index = (size_t)-1, keeps_at_start;
+    ol_unit first_line;
 
     if (!node || node->style.display == OL_DISPLAY_NONE) {
         *bottom_out = y;
         return 1;
     }
+    keeps_at_start = doc->keep_count;
     if (is_frame(node)) ml = mr = mt = mb = 0;   /* a frame is where it is put */
     if ((node->box.flags & OL_BOX_PAGE_BREAK_BEFORE) && !add_break(doc, y)) return 0;
 
@@ -1307,13 +1547,16 @@ static int layout_block(ol_document *doc, ol_node *node,
     }
 
     current_y = empty_top = box_y + node->style.padding_top;
+    zones_live(doc, node, inner_x, current_y);  /* 0.6: its frames, for its own lines too */
     start_flow(&flow, doc, node, measure, measure_userdata, inner_x, inner_x + inner_w,
                current_y, node->style.text_align, node->box.text_indent);
 
     if (node->role == OL_ROLE_TABLE) {
-        if (!layout_table(doc, node, inner_x, current_y, inner_w, measure,
-                          measure_userdata, &current_y))
-            return 0;
+        int ok;
+        ++doc->wrap_off;                    /* 0.6: a cell's lines do not wrap round frames */
+        ok = layout_table(doc, node, inner_x, current_y, inner_w, measure, measure_userdata, &current_y);
+        --doc->wrap_off;
+        if (!ok) return 0;
         flow.line_top = current_y;
     } else {
         if (node->text && node->text[0]) {
@@ -1350,10 +1593,18 @@ static int layout_block(ol_document *doc, ol_node *node,
     if (!flush_flow(&flow, &content_bottom)) return 0;
     if (content_bottom < current_y) content_bottom = current_y;
     if ((node->box.flags & OL_BOX_EMPTY_LINE) && content_bottom <= empty_top) {
+        if (flow.wraps) {                   /* 0.6: the empty line goes below a frame too */
+            flow.line_top = empty_top;
+            if (!line_room(&flow)) return 0;
+            empty_top = flow.line_top;
+        }
         content_bottom = empty_top + (node->style.line_height > 0 ? node->style.line_height
                                                                   : OL_CSSPX(20));
         if (!add_keep(doc, empty_top, content_bottom)) return 0;
     }
+    /* 0.6: where its first line went (below a frame, say), for the page its frames go on */
+    first_line = doc->keep_count > keeps_at_start ? doc->keeps[keeps_at_start].top
+                                                  : box_y + node->style.padding_top;
     content_bottom += node->style.padding_bottom;
 
     node->bounds.x = box_x;
@@ -1375,7 +1626,7 @@ static int layout_block(ol_document *doc, ol_node *node,
     /* frames last, above the flow they stand in */
     for (child = node->first_child; child; child = child->next_sibling)
         if (child->style.display != OL_DISPLAY_NONE && is_frame(child) &&
-            !layout_frame(doc, child, inner_x, box_y + node->style.padding_top,
+            !layout_frame(doc, child, inner_x, box_y + node->style.padding_top, first_line,
                           measure, measure_userdata))
             return 0;
 
@@ -1392,6 +1643,7 @@ static int layout_galley(ol_document *doc, ol_unit width,
     ol_unit y = 0, keep_with_next = 0;
     int has_keep_with_next = 0;
 
+    zones_live(doc, root, 0, 0);
     for (child = root->first_child; child; child = child->next_sibling) {
         size_t keeps_before = doc->keep_count;
         if (child->style.display == OL_DISPLAY_NONE || is_frame(child)) continue;
@@ -1418,7 +1670,7 @@ static int layout_galley(ol_document *doc, ol_unit width,
     }
     for (child = root->first_child; child; child = child->next_sibling)
         if (child->style.display != OL_DISPLAY_NONE && is_frame(child) &&
-            !layout_frame(doc, child, 0, 0, measure, measure_userdata))
+            !layout_frame(doc, child, 0, 0, 0, measure, measure_userdata))
             return 0;
 
     inline_bounds(doc);
@@ -1440,6 +1692,9 @@ static void reset_layout(ol_document *doc)
     doc->anchor_depth = 0;
     doc->paged = 0;
     doc->page_count = 0;
+    doc->zones_moved = 0;
+    for (i = 0; i < doc->zone_count; ++i) doc->zones[i].live = 0;   /* carried from the last pass */
+    doc->live_count = 0;
     for (i = 0; i < doc->node_count; ++i)
         memset(&doc->nodes[i]->bounds, 0, sizeof(doc->nodes[i]->bounds));
 }
@@ -1652,12 +1907,12 @@ static const ol_anchor *anchor_of(const ol_document *doc, size_t i, size_t *k)
     return *k < doc->anchor_count && doc->anchors[*k].first <= i ? &doc->anchors[*k] : NULL;
 }
 
-/* An anchored frame's page, and where its top left corner goes on it. */
-static int anchor_place(const ol_document *doc, const ol_anchor *a, int paged, ol_unit *ox, ol_unit *oy)
+/* Where an anchored frame's top left corner goes on a page that starts at
+ * start in the galley. */
+static void anchor_place_at(const ol_document *doc, const ol_anchor *a, int paged, ol_unit start,
+                            ol_unit *ox, ol_unit *oy)
 {
-    int p = paged ? page_holding(doc, a->y) : 0;
     ol_unit ml = paged ? doc->page.margin_left : 0, mt = paged ? doc->page.margin_top : 0;
-    ol_unit start = paged ? doc->page_start[p] : 0;
     switch (OL_ANCHOR_X_OF(a->anchor)) {
     case OL_ANCHOR_PAGE: *ox = a->frame.x; break;
     case OL_ANCHOR_MARGIN: *ox = ml + a->frame.x; break;
@@ -1668,7 +1923,223 @@ static int anchor_place(const ol_document *doc, const ol_anchor *a, int paged, o
     case OL_ANCHOR_MARGIN: *oy = mt + a->frame.y; break;
     default: *oy = mt + a->y - start + a->frame.y; break;
     }
+}
+
+/* An anchored frame's page, and where its top left corner goes on it. */
+static int anchor_place(const ol_document *doc, const ol_anchor *a, int paged, ol_unit *ox, ol_unit *oy)
+{
+    int p = !paged ? 0 : a->page >= 0 && a->page < doc->page_count ? a->page : page_holding(doc, a->y);
+    anchor_place_at(doc, a, paged, paged ? doc->page_start[p] : 0, ox, oy);
     return p;
+}
+
+/* 0.6: a frame's zone, the frame h high, on a page that starts at start in
+ * the galley. */
+static void frame_zone(const ol_document *doc, const ol_anchor *a, ol_unit h, ol_unit start, ol_wrap_zone *z)
+{
+    const ol_box_style *box = &a->node->box;
+    ol_unit ox, oy, w = a->frame.width > 0 ? a->frame.width : OL_CSSPX(1);
+    anchor_place_at(doc, a, doc->paging, start, &ox, &oy);
+    memset(z, 0, sizeof(*z));                /* compared whole, padding too */
+    z->node = a->node;
+    z->h = h;
+    z->x0 = ox - box->wrap_gap[3];
+    z->x1 = ox + w + box->wrap_gap[1];
+    z->y0 = oy - box->wrap_gap[0];
+    z->y1 = oy + h + box->wrap_gap[2];
+    z->wrap = box->wrap == OL_WRAP_TOP_BOTTOM ? OL_WRAP_TOP_BOTTOM : OL_WRAP_SQUARE;
+    z->after = OL_ANCHOR_Y_OF(a->anchor) == OL_ANCHOR_BLOCK && a->frame.y - box->wrap_gap[0] >= 0;
+    z->live = 1;
+    if (doc->paging) {
+        ol_unit dy = start - doc->page.margin_top;
+        z->x0 -= doc->page.margin_left;
+        z->x1 -= doc->page.margin_left;
+        z->y0 += dy;
+        z->y1 += dy;
+        z->page_top = start;
+        z->page_bottom = start + doc->body_height;
+    } else {
+        z->page_top = -0x3fffffff;
+        z->page_bottom = 0x3fffffff;
+    }
+}
+
+/* 0.6: a page this pass has just reached: the zones carried from the last
+ * pass that are on it move with it, to where it starts in this pass (a
+ * frame placed from its page keeps its place on it). Zones worked out in
+ * this pass already are where they belong. */
+static void zones_follow_page(ol_document *doc, int page)
+{
+    size_t i;
+    for (i = 0; i < doc->zone_count; ++i) {
+        ol_wrap_zone *z = &doc->zones[i];
+        ol_unit dy;
+        if (z->page != page) continue;
+        dy = doc->live_starts[page] - z->page_top;
+        z->y0 += dy;
+        z->y1 += dy;
+        z->page_top += dy;
+        z->page_bottom += dy;
+    }
+}
+
+/* 0.6: the pages of this pass up to y, as cut_pages will cut them, from
+ * the keeps and breaks laid out so far, a paragraph or a line about to
+ * start at y, its first line h high: the index of the page that line is
+ * on, its start in doc->live_starts. For the zones of the paragraph's frames,
+ * before the pass's pages are cut. A keep added after (a block kept
+ * together, a heading kept with what follows it) may still move a page
+ * break; the pass's own pages then show it, and another pass follows. 
+ * -1 when there is no memory. */
+static int live_page(ol_document *doc, ol_unit y, ol_unit h)
+{
+    if (!doc->live_count) {
+        if (!doc->live_capacity) {
+            doc->live_starts = (ol_unit *)malloc(8 * sizeof(ol_unit));
+            if (!doc->live_starts) return -1;
+            doc->live_capacity = 8;
+        }
+        doc->live_starts[doc->live_count++] = 0;
+        zones_follow_page(doc, 0);
+    }
+    for (;;) {
+        ol_unit start = doc->live_starts[doc->live_count - 1], limit = start + doc->body_height;
+        ol_unit end = limit, lo = limit, hi = limit, next = -1;
+        size_t i;
+        int grown, any = 0;
+        if (y + h <= limit || (y < limit && y <= start)) break;     /* y's first line is on this page */
+        for (i = 0; i < doc->break_count; ++i)
+            if (doc->breaks[i] > start && doc->breaks[i] <= limit && doc->breaks[i] < end) {
+                end = doc->breaks[i];
+                any = 1;
+            }
+        if (!any) {
+            /* not inside a line, a row or a frame: the keeps across the limit, and the ones they overlap */
+            do {
+                grown = 0;
+                for (i = 0; i <= doc->keep_count; ++i) {   /* and the paragraph's first line, to come */
+                    ol_span line;
+                    const ol_span *k = &line;
+                    line.top = y;
+                    line.bottom = y + h;
+                    if (i < doc->keep_count) k = &doc->keeps[i];
+                    if (k->top < hi && k->bottom > lo && (k->top < lo || k->bottom > hi)) {
+                        if (k->top < lo) lo = k->top;
+                        if (k->bottom > hi) hi = k->bottom;
+                        grown = 1;
+                    }
+                }
+            } while (grown);
+            if (lo < limit && lo > start) end = lo;
+        }
+        /* the next page starts at the next content */
+        for (i = 0; i <= doc->keep_count; ++i) {
+            ol_span line;
+            const ol_span *k = &line;
+            line.top = y;
+            line.bottom = y + h;
+            if (i < doc->keep_count) k = &doc->keeps[i];
+            if (k->top <= end && k->bottom > end) {
+                next = end;
+                break;
+            }
+            if (k->top > end && (next < 0 || k->top < next)) next = k->top;
+        }
+        if (next < 0) next = end;
+        if (next <= start) next = limit;     /* never stand still */
+        if (doc->live_count == doc->live_capacity) {
+            ol_unit *q = (ol_unit *)realloc(doc->live_starts, (size_t)doc->live_capacity * 2 * sizeof(*q));
+            if (!q) return -1;
+            doc->live_starts = q;
+            doc->live_capacity *= 2;
+        }
+        doc->live_starts[doc->live_count++] = next;
+        zones_follow_page(doc, doc->live_count - 1);
+    }
+    return doc->live_count - 1;
+}
+
+/* The page, of the first n starting at starts, that y is in. */
+static int page_among(const ol_unit *starts, int n, ol_unit y)
+{
+    int lo = 0, hi = n - 1;
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        if (starts[mid] <= y) lo = mid;
+        else hi = mid - 1;
+    }
+    return lo;
+}
+
+/* 0.6: a frame's zone worked out again where its paragraph starts (its
+ * content corner cx, cy; its first line, line high, as far below as the
+ * last pass put it), before the paragraph's lines: they and the lines after
+ * them wrap round it where it is in this pass. A frame does not go on to
+ * the page after the one the last pass put it on (its text pushed onto the
+ * next page would take it there, and it back). When it moved where lines
+ * already laid out (above cy) might have met it, another pass is needed. */
+static void zone_live(ol_document *doc, const ol_node *frame, ol_unit cx, ol_unit cy, ol_unit line)
+{
+    ol_anchor a;
+    ol_wrap_zone z, *e = NULL;
+    ol_unit h, start = 0, dy;
+    size_t i;
+    for (i = 0; i < doc->zone_count; ++i)
+        if (doc->zones[i].node == frame) {
+            e = &doc->zones[i];
+            break;
+        }
+    h = frame->box.frame.height > 0 ? frame->box.frame.height : e ? e->h : -1;
+    if (h < 0) return;                        /* its height comes when it is laid out */
+    dy = e ? e->line_dy : 0;
+    if (doc->paging) {
+        int p = live_page(doc, cy + dy, line);
+        if (p < 0) {
+            doc->zones_moved = 1;             /* the end of the pass has it, or fails */
+            return;
+        }
+        if (e && e->page + 1 == p) p = e->page;   /* not onto the next page, which would push its text back */
+        start = doc->live_starts[p];
+    }
+    memset(&a, 0, sizeof(a));
+    a.x = cx;
+    a.y = cy;
+    a.frame = frame->box.frame;
+    a.anchor = frame->box.anchor;
+    a.node = frame;
+    frame_zone(doc, &a, h, start, &z);
+    z.page = doc->paging ? page_among(doc->live_starts, doc->live_count, start) : 0;
+    z.line_dy = dy;
+    if (e) {
+        /* an after zone carried from the last pass met no line before this block */
+        if (!zone_same(e, &z) && ((e->y0 < cy && !e->after) || z.y0 < cy)) doc->zones_moved = 1;
+        *e = z;
+        return;
+    }
+    if (doc->zone_count == doc->zone_capacity) {
+        size_t cap = doc->zone_capacity ? doc->zone_capacity * 2 : 8;
+        ol_wrap_zone *q = (ol_wrap_zone *)realloc(doc->zones, cap * sizeof(*q));
+        if (!q) {
+            doc->zones_moved = 1;
+            return;
+        }
+        doc->zones = q;
+        doc->zone_capacity = cap;
+    }
+    if (z.y0 < cy) doc->zones_moved = 1;
+    doc->zones[doc->zone_count++] = z;
+}
+
+/* The frames of a block (its content corner cx, cy) that the body wraps round: their zones where it starts. */
+static void zones_live(ol_document *doc, const ol_node *block, ol_unit cx, ol_unit cy)
+{
+    const ol_node *child;
+    ol_unit line = block->style.line_height > 0 ? block->style.line_height : OL_CSSPX(20);
+    if (doc->wrap_off || doc->anchor_depth) return;
+    for (child = block->first_child; child; child = child->next_sibling)
+        if (child->style.display != OL_DISPLAY_NONE && (child->box.flags & OL_BOX_ABSOLUTE) &&
+            child->box.anchor && child->box.wrap != OL_WRAP_NONE)
+            zone_live(doc, child, cx, cy, line);
 }
 
 static void move_op(ol_display_op *op, ol_unit dx, ol_unit dy)
@@ -1908,6 +2379,58 @@ static int sort_ops_into_pages(ol_document *doc)
     return 1;
 }
 
+/* 0.6: after a pass, its frames' zones, where it put them, on its own
+ * pages: the zones the next pass's lines wrap round. 0 when they are the
+ * zones this pass's lines wrapped round (none moved where lines had
+ * already met it, and its pages start where they were taken to): the pass
+ * stands. 1 when they differ: they become the
+ * document's, for another pass. -1 when there is no memory for them. */
+#ifdef OL_CHECK_SORT
+int ol_wrap_layouts, ol_wrap_passes, ol_wrap_unsettled;
+#endif
+static int wrap_zones(ol_document *doc)
+{
+    size_t k, i, n = 0, live = 0;
+    ol_wrap_zone *swap;
+    int same = !doc->zones_moved;
+    for (k = 0; k < doc->anchor_count; ++k) {
+        ol_anchor *a = &doc->anchors[k];
+        ol_wrap_zone z;
+        ol_unit start = 0;
+        if (!a->node || a->node->box.wrap == OL_WRAP_NONE) continue;
+        for (i = 0; i < doc->zone_count && doc->zones[i].node != a->node; ++i) {}
+        if (doc->paging) {
+            /* the page its first line is on, or the one it had, when that is earlier */
+            int p = page_holding(doc, a->line_y);
+            if (i < doc->zone_count && doc->zones[i].page + 1 == p) p = doc->zones[i].page;
+            a->page = p;
+            start = doc->page_start[p];
+        }
+        frame_zone(doc, a, a->node->bounds.height, start, &z);
+        z.page = a->page >= 0 ? a->page : 0;
+        z.line_dy = a->line_y - a->y;
+        if (n == doc->next_capacity) {
+            size_t cap = doc->next_capacity ? doc->next_capacity * 2 : 8;
+            ol_wrap_zone *q = (ol_wrap_zone *)realloc(doc->next_zones, cap * sizeof(*q));
+            if (!q) return -1;
+            doc->next_zones = q;
+            doc->next_capacity = cap;
+        }
+        doc->next_zones[n++] = z;
+        if (same && (i == doc->zone_count || !zone_same(&doc->zones[i], &z))) same = 0;
+    }
+    live = doc->zone_count;
+    if (same && live == n) return 0;
+    swap = doc->zones;
+    doc->zones = doc->next_zones;
+    doc->next_zones = swap;
+    k = doc->zone_capacity;
+    doc->zone_capacity = doc->next_capacity;
+    doc->next_capacity = k;
+    doc->zone_count = n;
+    return 1;
+}
+
 /* Without pages (ol_layout): the anchored frames placed in the galley, the
  * ones behind first and the ones in front last. */
 static int place_anchors_flat(ol_document *doc)
@@ -1939,10 +2462,20 @@ static int place_anchors_flat(ol_document *doc)
 int ol_layout(ol_document *doc, ol_unit viewport_width,
               ol_measure_text_fn measure, void *measure_userdata)
 {
+    int pass, changed;
     if (!doc || viewport_width <= 0) return 0;
-    reset_layout(doc);
-    doc->viewport_width = viewport_width;
-    if (!layout_galley(doc, viewport_width, measure, measure_userdata)) return 0;
+    doc->zone_count = 0;
+    doc->paging = 0;
+    for (pass = 1;; ++pass) {               /* 0.6: again while the frames to wrap round move */
+        reset_layout(doc);
+        doc->viewport_width = viewport_width;
+        if (!layout_galley(doc, viewport_width, measure, measure_userdata)) return 0;
+        if ((changed = wrap_zones(doc)) < 0) return 0;
+        if (!changed || pass == OL_WRAP_PASSES) break;
+    }
+#ifdef OL_CHECK_SORT
+    if (doc->zone_count) { ++ol_wrap_layouts; ol_wrap_passes += pass; if (changed) ++ol_wrap_unsettled; }
+#endif
     if (!place_anchors_flat(doc)) return 0;
     if (!add_page(doc, 0, doc->content_height)) return 0;
     doc->page_ops[0] = doc->op_count;
@@ -1954,16 +2487,28 @@ int ol_layout_pages(ol_document *doc, const ol_page *page,
                     ol_measure_text_fn measure, void *measure_userdata)
 {
     ol_unit body_w, body_h;
+    int pass, changed;
     if (!doc || !page) return 0;
     body_w = page->width - page->margin_left - page->margin_right;
     body_h = page->height - page->margin_top - page->margin_bottom;
     if (body_w <= 0 || body_h <= 0) return 0;
-    reset_layout(doc);
-    doc->viewport_width = body_w;
-    if (!layout_galley(doc, body_w, measure, measure_userdata)) return 0;
-    sort_keeps_and_breaks(doc);
+    /* 0.6: laid out again, round the frames to wrap round where the last pass put them, until they stay */
+    doc->zone_count = 0;
+    doc->paging = 1;
     doc->page = *page;
-    if (!cut_pages(doc, body_h)) return 0;
+    doc->body_height = body_h;
+    for (pass = 1;; ++pass) {
+        reset_layout(doc);
+        doc->viewport_width = body_w;
+        if (!layout_galley(doc, body_w, measure, measure_userdata)) return 0;
+        sort_keeps_and_breaks(doc);
+        if (!cut_pages(doc, body_h)) return 0;
+        if ((changed = wrap_zones(doc)) < 0) return 0;
+        if (!changed || pass == OL_WRAP_PASSES) break;
+    }
+#ifdef OL_CHECK_SORT
+    if (doc->zone_count) { ++ol_wrap_layouts; ol_wrap_passes += pass; if (changed) ++ol_wrap_unsettled; }
+#endif
     if (!sort_ops_into_pages(doc)) return 0;
     doc->paged = 1;
     ++doc->generation;

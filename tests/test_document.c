@@ -1002,6 +1002,372 @@ static void test_sort_in_place(void)
     CHECK(ol_sort_mismatches == 0);
 }
 
+/* ---- 0.6: text round frames ---------------------------------------------- */
+
+extern int ol_wrap_layouts, ol_wrap_passes, ol_wrap_unsettled;
+
+/* An anchored frame that the body wraps round. */
+static ol_node *wrapped(ol_document *doc, ol_node *parent, uint32_t anchor, ol_unit x, ol_unit y,
+                        ol_unit w, ol_unit h, uint32_t wrap, ol_unit gap)
+{
+    ol_node *f = anchored(doc, parent, anchor, x, y, w, h);
+    ol_box_style box = *ol_node_box(f);
+    box.wrap = wrap;
+    box.wrap_gap[1] = box.wrap_gap[3] = gap;
+    ol_node_set_box(f, &box);
+    return f;
+}
+
+/* How many of the body's text ops on a page (those of the nodes in body) cross a rectangle in the
+ * page's coordinates; a piece's trailing spaces, which may hang past a stretch's end, left out. */
+static int crossing(const ol_document *doc, int page, ol_rect r, const ol_id *body, size_t nbody)
+{
+    size_t first, count, i, k;
+    int n = 0;
+    if (!ol_display_page_range(doc, page, &first, &count)) return 0;
+    for (i = first; i < first + count; ++i) {
+        const ol_display_op *op = ol_display_get(doc, i);
+        const ol_node *node;
+        const char *t;
+        ol_unit w;
+        size_t len;
+        int mine = 0;
+        if (op->type != OL_OP_TEXT) continue;
+        for (k = 0; k < nbody; ++k) mine |= body[k] == op->u.text.node_id;
+        if (!mine) continue;
+        node = ol_node_by_id(doc, op->u.text.node_id);
+        t = ol_node_text(node) + op->u.text.text_offset;
+        len = op->u.text.text_length;
+        w = op->u.text.bounds.width;
+        while (len && t[len - 1] == ' ') {
+            --len;
+            w -= OL_TEXT_FONT_OF(op->u.text.style.text_flags) == 1 ? OL_CSSPX(10) : OL_CSSPX(8);
+        }
+        if (!len) continue;
+        if (op->u.text.bounds.x < r.x + r.width && op->u.text.bounds.x + w > r.x &&
+            op->u.text.bounds.y < r.y + r.height && op->u.text.bounds.y + op->u.text.bounds.height > r.y)
+            ++n;
+    }
+    return n;
+}
+
+static ol_rect rect(ol_unit x, ol_unit y, ol_unit w, ol_unit h)
+{
+    ol_rect r;
+    r.x = x;
+    r.y = y;
+    r.width = w;
+    r.height = h;
+    return r;
+}
+
+static void test_wrap_frames(void)
+{
+    ol_document *doc = ol_document_new();
+    ol_page page;
+    ol_node *p1, *p2, *p3, *tb, *cellp, *f1, *f2, *f3, *f4, *t4;
+    ol_id body[8];
+    ol_box_style box;
+    const ol_display_op *op, *ops[64];
+    size_t i, n;
+    int left = 0, right = 0, under = 0, beside = 0, below = 0, layouts = ol_wrap_layouts, passes = ol_wrap_passes;
+    int unsettled = ol_wrap_unsettled;
+    static const char words[] = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor "
+                                "incididunt ut labore et dolore magna aliqua ut enim ad minim veniam quis "
+                                "nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat";
+
+    memset(&page, 0, sizeof(page));
+    page.width = OL_CSSPX(400);
+    page.height = OL_CSSPX(310);       /* 270 px of body: 13 and a half lines of 20 px */
+    page.margin_top = page.margin_bottom = OL_CSSPX(20);
+    page.margin_left = page.margin_right = OL_CSSPX(20);
+
+    /* a picture at the top left of the body, square, 10 px from the text beside it */
+    p1 = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    body[0] = ol_node_id(text(doc, p1, words, OL_CSSPX(16), 0));
+    f1 = wrapped(doc, p1, OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_MARGIN), 0, 0,
+                 OL_CSSPX(100), OL_CSSPX(60), OL_WRAP_SQUARE, OL_CSSPX(10));
+    picture(doc, f1, 1, OL_CSSPX(100), OL_CSSPX(60));
+    /* one in the middle of the column, text on both sides, justified */
+    p2 = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_JUSTIFY);
+    body[1] = ol_node_id(text(doc, p2, words, OL_CSSPX(16), 0));
+    f2 = wrapped(doc, p2, OL_ANCHOR_X(OL_ANCHOR_PAGE) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), OL_CSSPX(160), OL_CSSPX(20),
+                 OL_CSSPX(80), OL_CSSPX(40), OL_WRAP_SQUARE, 0);
+    /* a text box above and below which the text goes, in front; its own text does not wrap */
+    p3 = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    body[2] = ol_node_id(text(doc, p3, words, OL_CSSPX(16), 0));
+    f3 = wrapped(doc, p3, OL_ANCHOR_X(OL_ANCHOR_PAGE) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), OL_CSSPX(100), OL_CSSPX(10),
+                 OL_CSSPX(100), OL_CSSPX(30), OL_WRAP_TOP_BOTTOM, 0);
+    text(doc, f3, "box text", OL_CSSPX(16), 0);
+    /* a table under a square frame: its cells do not wrap */
+    tb = block(doc, NULL, OL_ROLE_TABLE, OL_ALIGN_START);
+    {
+        ol_node *row = block(doc, tb, OL_ROLE_ROW, OL_ALIGN_START);
+        ol_node *cell = block(doc, row, OL_ROLE_CELL, OL_ALIGN_START);
+        cellp = text(doc, cell, "cell", OL_CSSPX(16), 0);
+    }
+    f4 = wrapped(doc, tb, OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), 0, 0,
+                 OL_CSSPX(60), OL_CSSPX(20), OL_WRAP_SQUARE, 0);
+    t4 = text(doc, f4, "f", OL_CSSPX(16), 0);
+    (void)p3;
+    (void)f2;
+
+    CHECK(ol_layout_pages(doc, &page, measure, NULL));
+    CHECK(ol_wrap_layouts == layouts + 1 && ol_wrap_unsettled == unsettled);
+    /* each frame's zone is worked out where its paragraph starts: one pass */
+    CHECK(ol_wrap_passes - passes == 1);
+
+    /* the picture: the first three lines start 10 px right of it, the fourth at the margin */
+    n = text_ops(doc, body[0], ops, 64);
+    CHECK(n > 10);
+    for (i = 0; i < n; ++i) {
+        op = ops[i];
+        CHECK(op->page == 0);
+        if (op->u.text.bounds.y < OL_CSSPX(80)) {
+            CHECK(op->u.text.bounds.x >= OL_CSSPX(130));
+            if (op->u.text.bounds.x == OL_CSSPX(130)) ++left;
+        } else if (op->u.text.bounds.y == OL_CSSPX(80) && op->u.text.bounds.x == OL_CSSPX(20)) {
+            ++right;
+        }
+    }
+    CHECK(left == 3 && right == 1);
+    CHECK(crossing(doc, 0, rect(OL_CSSPX(20), OL_CSSPX(20), OL_CSSPX(110), OL_CSSPX(60)), body, 3) == 0);
+
+    /* the frame in the middle: lines beside it on both sides, none under it */
+    n = text_ops(doc, body[1], ops, 64);
+    {
+        const ol_display_op *f = page_op(doc, 0, OL_OP_TEXT, 0);
+        ol_unit fy = 0;
+        (void)f;
+        for (i = 0; i < ol_display_count(doc); ++i) {
+            op = ol_display_get(doc, i);
+            if (op->type == OL_OP_TEXT && op->u.text.node_id == body[1]) { fy = op->u.text.bounds.y; break; }
+        }
+        /* the paragraph's first line is 20 px above the frame */
+        for (i = 0; i < n; ++i) {
+            op = ops[i];
+            if (op->u.text.bounds.y >= fy + OL_CSSPX(20) && op->u.text.bounds.y < fy + OL_CSSPX(60)) {
+                if (op->u.text.bounds.x < OL_CSSPX(160)) ++beside;
+                else if (op->u.text.bounds.x >= OL_CSSPX(240)) ++under;
+                else ++below;                   /* none starts under the frame */
+            }
+        }
+        CHECK(beside >= 2 && under >= 2 && below == 0);
+        CHECK(crossing(doc, 0, rect(OL_CSSPX(160), fy + OL_CSSPX(20), OL_CSSPX(80), OL_CSSPX(40)), body, 3) == 0);
+        /* justified: the left stretch's last piece ends at the frame (its spaces may hang) */
+        {
+            ol_unit end = 0;
+            for (i = 0; i < n; ++i)
+                if (ops[i]->u.text.bounds.y == fy + OL_CSSPX(20) && ops[i]->u.text.bounds.x < OL_CSSPX(160) &&
+                    ops[i]->u.text.bounds.x + ops[i]->u.text.bounds.width > end)
+                    end = ops[i]->u.text.bounds.x + ops[i]->u.text.bounds.width;
+            CHECK(end >= OL_CSSPX(160) - OL_CSSPX(1) && end <= OL_CSSPX(168));
+        }
+    }
+
+    /* the text box: nothing beside it; its own text inside it */
+    {
+        ol_unit fy = 0;
+        int p = 0;
+        for (i = 0; i < ol_display_count(doc); ++i) {
+            op = ol_display_get(doc, i);
+            if (op->type == OL_OP_TEXT && op->u.text.node_id == ol_node_id(ol_node_by_id(doc, ol_node_id(f3) + 1))) {
+                fy = op->u.text.bounds.y;
+                p = op->page;
+                CHECK(op->u.text.bounds.x == OL_CSSPX(100));
+                break;
+            }
+        }
+        CHECK(fy > 0);
+        CHECK(crossing(doc, p, rect(OL_CSSPX(20), fy, OL_CSSPX(360), OL_CSSPX(30)), body, 3) == 0);
+    }
+
+    /* the table's cell is where it would be; the frame over it too */
+    op = first_text(doc, cellp);
+    CHECK(op && op->u.text.bounds.x < OL_CSSPX(40));
+    op = first_text(doc, t4);
+    CHECK(op && op->u.text.bounds.x == OL_CSSPX(20));
+
+    /* without wrap the same document has the picture's text at the margin */
+    box = *ol_node_box(f1);
+    box.wrap = OL_WRAP_NONE;
+    ol_node_set_box(f1, &box);
+    CHECK(ol_layout_pages(doc, &page, measure, NULL));
+    op = first_text(doc, ol_node_by_id(doc, body[0]));
+    CHECK(op && op->u.text.bounds.x == OL_CSSPX(20) && op->u.text.bounds.y == OL_CSSPX(20));
+
+    /* a program built for 0.5's ol_box_style (openlayout.library 5 or 6): no wrap */
+    box.wrap = OL_WRAP_SQUARE;
+    box.size = (uint32_t)OL_BOX_STYLE_SIZE_0_5;
+    ol_node_set_box(f1, &box);
+    CHECK(ol_node_box(f1)->wrap == OL_WRAP_NONE && ol_node_box(f1)->anchor == box.anchor);
+
+    /* without pages: round the frame where ol_layout puts it in the galley */
+    box.size = sizeof(box);
+    ol_node_set_box(f1, &box);
+    CHECK(ol_layout(doc, OL_CSSPX(360), measure, NULL));
+    op = first_text(doc, ol_node_by_id(doc, body[0]));
+    CHECK(op && op->u.text.bounds.x == OL_CSSPX(110) && op->u.text.bounds.y == 0);
+    ol_document_free(doc);
+}
+
+/* A frame on a later page, from its paragraph; a frame that pushes the text it is anchored in onto the next
+ * page; an empty line under a frame. */
+static void test_wrap_pages(void)
+{
+    ol_document *doc = ol_document_new();
+    ol_page page;
+    ol_node *b, *f, *empty, *lastp = NULL;
+    ol_id body[40];
+    size_t nb = 0, i;
+    int unsettled = ol_wrap_unsettled, p;
+    char line[64];
+    const ol_display_op *op;
+
+    memset(&page, 0, sizeof(page));
+    page.width = OL_CSSPX(400);
+    page.height = OL_CSSPX(310);
+    page.margin_top = page.margin_bottom = OL_CSSPX(20);
+    page.margin_left = page.margin_right = OL_CSSPX(20);
+    for (i = 0; i < 20; ++i) {
+        b = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+        snprintf(line, sizeof line, "line %02u with some more words to fill it up to the end", (unsigned)i);
+        body[nb++] = ol_node_id(text(doc, b, line, OL_CSSPX(16), 0));
+        if (i == 16) {                          /* on page 2: a picture at the right, from this paragraph */
+            f = wrapped(doc, b, OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), OL_CSSPX(260), 0,
+                        OL_CSSPX(100), OL_CSSPX(100), OL_WRAP_SQUARE, OL_CSSPX(10));
+            picture(doc, f, 3, OL_CSSPX(100), OL_CSSPX(100));
+        }
+        lastp = b;
+    }
+    /* an empty line (a word processor's) under a top and bottom frame anchored in it */
+    empty = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    {
+        ol_box_style box;
+        ol_box_style_init(&box);
+        box.flags = OL_BOX_EMPTY_LINE;
+        ol_node_set_box(empty, &box);
+    }
+    f = wrapped(doc, empty, OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK), 0, 0,
+                OL_CSSPX(50), OL_CSSPX(50), OL_WRAP_TOP_BOTTOM, 0);
+    picture(doc, f, 4, OL_CSSPX(50), OL_CSSPX(50));
+    b = block(doc, NULL, OL_ROLE_PARAGRAPH, OL_ALIGN_START);
+    body[nb++] = ol_node_id(text(doc, b, "after the empty line", OL_CSSPX(16), 0));
+    (void)lastp;
+
+    CHECK(ol_layout_pages(doc, &page, measure, NULL));
+    CHECK(ol_wrap_unsettled == unsettled);
+    /* page 1 is as it was: every line at the margin */
+    for (i = 0; i < ol_display_count(doc); ++i) {
+        op = ol_display_get(doc, i);
+        if (op->type == OL_OP_TEXT && op->page == 0 && op->u.text.text_offset == 0)
+            CHECK(op->u.text.bounds.x == OL_CSSPX(20));
+    }
+    /* on every page, no body text under the frames */
+    for (p = 0; p < ol_page_count(doc); ++p) {
+        size_t first, count, k;
+        CHECK(ol_display_page_range(doc, p, &first, &count));
+        for (k = first; k < first + count; ++k) {
+            op = ol_display_get(doc, k);
+            if (op->type == OL_OP_IMAGE)
+                CHECK(crossing(doc, p, op->u.image.bounds, body, nb) == 0);
+        }
+    }
+    /* the picture's paragraph wraps: its lines end before the picture */
+    op = first_text(doc, ol_node_by_id(doc, body[16]));
+    CHECK(op && op->page == 2);
+    /* the paragraph after the empty line is below the frame in it */
+    {
+        const ol_display_op *pic = NULL, *after = first_text(doc, ol_node_by_id(doc, body[nb - 1]));
+        for (i = 0; i < ol_display_count(doc); ++i)
+            if (ol_display_get(doc, i)->type == OL_OP_IMAGE && ol_display_get(doc, i)->u.image.image_id == 4)
+                pic = ol_display_get(doc, i);
+        CHECK(pic && after && after->page == pic->page &&
+              after->u.text.bounds.y >= pic->u.image.bounds.y + pic->u.image.bounds.height);
+    }
+    ol_document_free(doc);
+}
+
+/* Random documents with frames to wrap round: no body text under them, wherever the passes settled. The
+ * first 30 are a word processor's usual: pictures and boxes placed from their paragraphs, below their
+ * corners, and the cover's from the page; laid out in one pass, or two. The other 60 put many frames from
+ * their pages anywhere, above their paragraphs too, on small pages. */
+static void test_wrap_random(void)
+{
+    int round, settled = 0, usual_passes = 0, layouts = ol_wrap_layouts, passes0 = ol_wrap_passes;
+    for (round = -30; round < 60; ++round) {
+        ol_document *doc = ol_document_new();
+        ol_page page;
+        ol_id body[128];
+        size_t nb = 0, first, count, k, f;
+        int i, n = 10 + (int)next_rand(40), p, unsettled = ol_wrap_unsettled;
+        ol_node *frames[64];
+        size_t nf = 0;
+        memset(&page, 0, sizeof(page));
+        page.width = OL_CSSPX(200 + next_rand(200));
+        page.height = OL_CSSPX(150 + next_rand(150));
+        page.margin_top = page.margin_bottom = OL_CSSPX(10 + next_rand(20));
+        page.margin_left = page.margin_right = OL_CSSPX(10 + next_rand(20));
+        for (i = 0; i < n; ++i) {
+            unsigned what = next_rand(6);
+            ol_node *b = block(doc, NULL, OL_ROLE_PARAGRAPH, next_rand(3) == 0 ? OL_ALIGN_JUSTIFY
+                                                              : next_rand(2) ? OL_ALIGN_START : OL_ALIGN_CENTER);
+            body[nb++] = ol_node_id(text(doc, b, what == 0 ? "a short line" :
+                                         "one two three four five six seven eight nine ten eleven twelve", OL_CSSPX(16), 0));
+            if (what >= 3 && nf < 64) {
+                uint32_t from_y = round < 0 ? (i == 0 ? OL_ANCHOR_PAGE : OL_ANCHOR_BLOCK)
+                                : next_rand(2) ? OL_ANCHOR_BLOCK : OL_ANCHOR_MARGIN;
+                ol_node *fr = wrapped(doc, b, OL_ANCHOR_X(next_rand(2) ? OL_ANCHOR_MARGIN : OL_ANCHOR_PAGE) |
+                                                  OL_ANCHOR_Y(from_y),
+                                      OL_CSSPX(next_rand(150)), OL_CSSPX(next_rand(100)),
+                                      OL_CSSPX(20 + next_rand(100)), OL_CSSPX(10 + next_rand(80)),
+                                      what == 5 ? OL_WRAP_TOP_BOTTOM : OL_WRAP_SQUARE, OL_CSSPX(next_rand(10)));
+                picture(doc, fr, (int)nf, OL_CSSPX(10), OL_CSSPX(10));
+                frames[nf++] = fr;
+            }
+        }
+        {
+            int before = ol_wrap_passes;
+            CHECK(ol_layout_pages(doc, &page, measure, NULL));
+            if (round < 0) {
+                CHECK(ol_wrap_unsettled == unsettled && ol_wrap_passes - before <= 2);
+                usual_passes += ol_wrap_passes - before;
+            }
+        }
+        if (ol_wrap_unsettled == unsettled) {
+            if (round >= 0) ++settled;
+            /* each frame's place on its page: its picture's corner and its own size */
+            for (p = 0; p < ol_page_count(doc); ++p) {
+                CHECK(ol_display_page_range(doc, p, &first, &count));
+                for (k = first; k < first + count; ++k) {
+                    const ol_display_op *op = ol_display_get(doc, k);
+                    if (op->type != OL_OP_IMAGE) continue;
+                    f = (size_t)op->u.image.image_id;
+                    if (f < nf) {
+                        const ol_box_style *box = ol_node_box(frames[f]);
+                        ol_rect r = rect(op->u.image.bounds.x - box->wrap_gap[3], op->u.image.bounds.y,
+                                         box->frame.width + box->wrap_gap[1] + box->wrap_gap[3], box->frame.height);
+                        int c = crossing(doc, p, r, body, nb);
+                        if (c) printf("round %d page %d frame %u crossed by %d\n", round, p, (unsigned)f, c);
+                        CHECK(c == 0);
+                    }
+                }
+            }
+        }
+        /* and again: the same */
+        {
+            size_t ops = ol_display_count(doc);
+            int pages = ol_page_count(doc);
+            CHECK(ol_layout_pages(doc, &page, measure, NULL));
+            CHECK(ol_display_count(doc) == ops && ol_page_count(doc) == pages);
+        }
+        ol_document_free(doc);
+    }
+    printf("OPENLAYOUT WRAP usual %d passes for 30, random %d of 60 settled, %d passes in %d layouts\n", usual_passes,
+           settled, ol_wrap_passes - passes0, ol_wrap_layouts - layouts);
+    CHECK(settled >= 50);
+}
+
 int main(void)
 {
     test_alignment();
@@ -1017,6 +1383,9 @@ int main(void)
     test_tabs();
     test_aligned_tabs();
     test_sort_in_place();
+    test_wrap_frames();
+    test_wrap_pages();
+    test_wrap_random();
     if (failures) {
         printf("OPENLAYOUT DOCUMENT FAIL (%d)\n", failures);
         return 20;

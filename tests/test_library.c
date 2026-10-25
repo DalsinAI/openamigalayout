@@ -283,6 +283,61 @@ int main(void)
                 OL_DocumentFree(roomy);
             }
         }
+        if (OpenLayoutBase->lib_Version >= OPENLAYOUTLIB_WRAP_VERSION) {
+            /* text round a frame: a last page whose paragraph starts beside a picture at its left margin,
+             * 10 px from it; with a 0.5 program's box style, at the margin */
+            ol_node *para, *frame, *words;
+            ol_box_style wb;
+            ULONG k, n;
+            ol_unit x = -1;
+            int pass;
+            append.parent = OL_DocumentRoot(paged);
+            append.role = OL_ROLE_PARAGRAPH;
+            append.text = NULL;
+            para = OL_NodeAppend(&append);
+            CHECK(para != NULL);
+            OL_BoxStyleInit(&bs);
+            bs.flags = OL_BOX_PAGE_BREAK_BEFORE;
+            box_req.node = para;
+            box_req.box = &bs;
+            OL_NodeSetBox(&box_req);
+            append.parent = para;
+            append.role = OL_ROLE_TEXT;
+            append.text = (CONST_STRPTR)"These words go round the picture beside them, and then under it.";
+            words = OL_NodeAppend(&append);
+            CHECK(words != NULL);
+            style_req.node = words;
+            style_req.style = &style;
+            OL_NodeSetStyle(&style_req);
+            append.parent = para;
+            append.role = OL_ROLE_BLOCK;
+            append.text = NULL;
+            frame = OL_NodeAppend(&append);
+            CHECK(frame != NULL);
+            for (pass = 0; pass < 2; ++pass) {
+                memset(&wb, 0, sizeof(wb));
+                OL_BoxStyleInit(&wb);
+                wb.size = pass ? (ULONG)OL_BOX_STYLE_SIZE_0_5 : sizeof(ol_box_style);
+                wb.flags = OL_BOX_ABSOLUTE;
+                wb.frame.width = OL_CSSPX(100);
+                wb.frame.height = OL_CSSPX(60);
+                wb.anchor = OL_ANCHOR_X(OL_ANCHOR_MARGIN) | OL_ANCHOR_Y(OL_ANCHOR_BLOCK);
+                wb.wrap = OL_WRAP_SQUARE;
+                wb.wrap_gap[1] = OL_CSSPX(10);
+                box_req.node = frame;
+                box_req.box = &wb;
+                OL_NodeSetBox(&box_req);
+                CHECK(OL_LayoutPages(&pages_req));
+                n = OL_DisplayCount(paged);
+                x = -1;
+                for (k = 0; k < n; ++k) {
+                    const ol_display_op *op = OL_DisplayGet(paged, k);
+                    if (op->type == OL_OP_TEXT && op->u.text.node_id == OL_NodeID(words) && op->u.text.text_offset == 0)
+                        x = op->u.text.bounds.x;
+                }
+                CHECK(x == (pass ? page.margin_left : page.margin_left + OL_CSSPX(110)));
+            }
+        }
         printf("LAYOUTLIB PAGES %ld\n", (long)OL_PageCount(paged));
         OL_DocumentFree(paged);
     }

@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define OL_VERSION "0.5"
+#define OL_VERSION "0.6"
 
 /*
  * OpenLayout logical units are exact across the three worlds we care about:
@@ -278,6 +278,13 @@ typedef struct {
      * OL_BOX_STYLE_SIZE_0_3): a program that anchors frames sets size to
      * sizeof(ol_box_style) and anchor itself, and opens version 5. */
     uint32_t anchor;
+    /* 0.6: how the body's text goes round an anchored frame (OL_WRAP_...),
+     * and the room it keeps from the frame's edges: top, right, bottom,
+     * left. Through openlayout.library, a program sets size to
+     * sizeof(ol_box_style) and opens version 7; with an older size its
+     * frames have no wrap. */
+    uint32_t wrap;
+    ol_unit wrap_gap[4];
 } ol_box_style;
 
 /* An anchored frame (box.anchor not 0) is laid out on its own and placed
@@ -305,6 +312,35 @@ enum {
 /* The size of an ol_box_style before 0.4's anchor, as programs built for
  * openlayout.library 3 and 4 have it */
 #define OL_BOX_STYLE_SIZE_0_3 offsetof(ol_box_style, anchor)
+
+/* 0.6: text round an anchored frame (box.wrap). The body's lines on the
+ * frame's page keep wrap_gap from it:
+ * - OL_WRAP_SQUARE: beside it, on either side that has room (a word
+ *   processor's square and tight wrapping): a line that a frame crosses
+ *   is the stretches either side of it, each at least OL_WRAP_MIN wide,
+ *   filled left to right; with none, the line goes below the frame;
+ * - OL_WRAP_TOP_BOTTOM: above and below it, none beside it.
+ * Only the body's own lines wrap: not those in a table's cells, nor in a
+ * frame. A line meets a frame when it is on the frame's page (it fits in
+ * that page's body) and crosses it at its nominal height (its block's
+ * line_height, or 1.25 times its font size), so a line much taller than
+ * that may still reach a frame below it. A wrapped frame goes on the page
+ * its paragraph's first line is on. Its place is worked out where its
+ * paragraph starts, so the lines after it wrap round it at once; a frame
+ * above its paragraph, or one whose page moves, takes ol_layout_pages
+ * another pass (OL_WRAP_PASSES in all at most), until the frames stay
+ * where the lines were wrapped round them. A document with no frame to
+ * wrap round is laid out once, as before. */
+enum {
+    OL_WRAP_NONE = 0,
+    OL_WRAP_SQUARE = 1,
+    OL_WRAP_TOP_BOTTOM = 2
+};
+#define OL_WRAP_MIN OL_CSSPX(48)
+#define OL_WRAP_PASSES 4
+/* The size of an ol_box_style before 0.6's wrap, as programs built for
+ * openlayout.library 5 and 6 have it */
+#define OL_BOX_STYLE_SIZE_0_5 offsetof(ol_box_style, wrap)
 
 void ol_box_style_init(ol_box_style *box);
 /* Copies box->size bytes at most, so a smaller older ol_box_style works. */
