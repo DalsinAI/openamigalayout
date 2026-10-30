@@ -109,12 +109,14 @@ static int kind_of(const char *tag, const char *type)
     if (!strcmp(tag, "tab")) return K_TAB;
     if (!strcmp(tag, "progress")) return K_PROGRESS;
     if (!strcmp(tag, "img")) return K_IMAGE;
+    if (!strcmp(tag, "slider")) return K_SLIDER;
     return K_BOX;
 }
 
 static int is_void(const char *tag)
 {
-    return !strcmp(tag, "input") || !strcmp(tag, "br") || !strcmp(tag, "hr") || !strcmp(tag, "img");
+    return !strcmp(tag, "input") || !strcmp(tag, "br") || !strcmp(tag, "hr") || !strcmp(tag, "img") ||
+           !strcmp(tag, "slider");
 }
 
 /* Appends UTF-8 for code point c */
@@ -217,6 +219,7 @@ static int set_attr(olui_el *el, const char *name, const char *value, char *type
     else if (!strcmp(name, "selected")) el->state |= S_SELECTED;
     else if (!strcmp(name, "open")) el->state |= S_OPEN;
     else if (!strcmp(name, "max")) el->imax = atoi(value);
+    else if (!strcmp(name, "min")) el->imin = atoi(value);
     else if (!strcmp(name, "image")) el->ivalue = atoi(value);
     else if (!strcmp(name, "width")) el->img_w = atoi(value);
     else if (!strcmp(name, "height")) el->img_h = atoi(value);
@@ -322,6 +325,11 @@ static int parse_content(parser *ps, olui_el *parent, int depth)
                 free(value);
             }
             el->kind = kind_of(tag, type[0] ? type : NULL);
+            if (el->kind == K_SLIDER) {
+                el->ivalue = el->value ? atoi(el->value) : el->imin;
+                if (el->ivalue < el->imin) el->ivalue = el->imin;
+                if (el->ivalue > el->imax) el->ivalue = el->imax;
+            }
             if (!strcmp(tag, "style")) {
                 /* its text goes to the stylesheet */
                 const char *e = strstr(ps->p, "</style");

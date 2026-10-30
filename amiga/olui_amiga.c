@@ -104,6 +104,8 @@ struct olui_amiga {
     } own[MAX_OWN];
     int nown;
     char mono_name[64];
+    olui_amiga_image_fn image_fn;   /* draws img's pictures (olui_amiga_images) */
+    void *image_data;
 };
 
 /* ---- Colours ---------------------------------------------------------------- */
@@ -450,6 +452,9 @@ static void draw_op(void *userdata, const olui_draw_op *op)
     case OLUI_DRAW_TEXT: draw_text(a, op); break;
     case OLUI_DRAW_MARK: draw_mark(a, op); break;
     case OLUI_DRAW_CLIP: set_clip(a, op->clip.w > 0 ? &op->clip : NULL); break;
+    case OLUI_DRAW_IMAGE:
+        if (a->image_fn) a->image_fn(a->image_data, a->rp, op->el, op->image, op->box.x, op->box.y, op->box.w, op->box.h);
+        break;
     default: break;
     }
     if (op->kind == OLUI_DRAW_BOX && op->el) {
@@ -605,6 +610,13 @@ int olui_amiga_own(olui_amiga *a, const olui_el *el, olui_amiga_own_fn fn, void 
     a->own[i].data = userdata;
     a->own[i].seen = 0;
     return 1;
+}
+
+void olui_amiga_images(olui_amiga *a, olui_amiga_image_fn fn, void *userdata)
+{
+    if (!a) return;
+    a->image_fn = fn;
+    a->image_data = userdata;
 }
 
 void olui_amiga_fonts(olui_amiga *a, const char *font, const char *mono)

@@ -12,6 +12,7 @@
 #include "olui_internal.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #define PX(n) OL_CSSPX(n)
@@ -23,7 +24,7 @@ static const char ua_css[] =
     "row{display:flex;gap:6px}"
     "column{display:flex;flex-direction:column;gap:6px}"
     "h1{font-size:20px;font-weight:bold}h2{font-size:16px;font-weight:bold}h3{font-weight:bold}"
-    "span,b,strong,i,em,u,code,a{display:inline}"
+    "span,b,strong,i,em,u,code,a,img{display:inline}"
     "b,strong{font-weight:bold}i,em{font-style:italic}u,a{text-decoration:underline}"
     "code{font-family:monospace}"
     "hr{height:1px;background:#909090}"
@@ -40,6 +41,9 @@ static const char ua_css[] =
     "item,li{padding:1px 4px}"
     "item:selected,li:selected{background:#3366cc;color:#ffffff}"
     "progress{height:14px;border:1px solid #808080;background:#ffffff;padding:1px}"
+    "slider{height:16px;width:120px;padding:0 7px;accent-color:#3366cc;mark-background:#ffffff;"
+    "mark-border-color:#808080;border:1px solid #808080;background:linear-gradient(#ffffff,#d6d6d6);border-radius:3px}"
+    "slider:focus{mark-border-color:#3366cc}"
     "tabs{display:flex;flex-direction:column}"
     "tabstrip{display:flex;gap:2px}"
     "tabbutton{border-radius:0;background:#d6d6d6}"
@@ -383,8 +387,8 @@ static int build(olui *ui, olui_el *el, ol_node *parent, const olui_cs *pcs, int
     box = cs->box;
     st.background = 0;          /* olui draws the boxes */
     if (st.display == OL_DISPLAY_INLINE && el->kind != K_TEXT && el->first == NULL &&
-        el->kind != K_BOX)
-        st.display = OL_DISPLAY_BLOCK;  /* widgets are boxes */
+        el->kind != K_BOX && el->kind != K_IMAGE)
+        st.display = OL_DISPLAY_BLOCK;  /* widgets are boxes; a picture stays in its line, where OpenLayout places it */
     line = st.line_height > st.font_size ? st.line_height : st.font_size;
 
     switch (el->kind) {
@@ -410,6 +414,10 @@ static int build(olui *ui, olui_el *el, ol_node *parent, const olui_cs *pcs, int
         break;
     case K_PROGRESS:
         text = NULL;
+        break;
+    case K_SLIDER:
+        text = NULL;
+        if (box.height <= 0) box.height = line;
         break;
     case K_IMAGE:
         text = NULL;
@@ -458,6 +466,7 @@ static int build(olui *ui, olui_el *el, ol_node *parent, const olui_cs *pcs, int
         if (el->state & S_FOCUS) states |= OL_STATE_FOCUSED;
         switch (el->kind) {
         case K_BUTTON: case K_CHECK: case K_RADIO: case K_TABBTN: actions = OL_ACTION_ACTIVATE | OL_ACTION_FOCUS; break;
+        case K_SLIDER: actions = OL_ACTION_EDIT | OL_ACTION_FOCUS; break;
         case K_INPUT: actions = OL_ACTION_EDIT | OL_ACTION_FOCUS; break;
         case K_LIST: actions = OL_ACTION_FOCUS; break;
         case K_ITEM: actions = OL_ACTION_SELECT | OL_ACTION_ACTIVATE; break;
@@ -667,7 +676,7 @@ static olui_el *widget_of(olui_el *el)
     for (; el; el = el->parent) {
         switch (el->kind) {
         case K_BUTTON: case K_CHECK: case K_RADIO: case K_INPUT: case K_ITEM:
-        case K_TABBTN: case K_LIST:
+        case K_TABBTN: case K_LIST: case K_SLIDER:
             return el;
         default:
             break;
@@ -679,7 +688,7 @@ static olui_el *widget_of(olui_el *el)
 static int focusable(const olui_el *el)
 {
     switch (el->kind) {
-    case K_BUTTON: case K_CHECK: case K_RADIO: case K_INPUT: case K_LIST: case K_TABBTN:
+    case K_BUTTON: case K_CHECK: case K_RADIO: case K_INPUT: case K_LIST: case K_TABBTN: case K_SLIDER:
         return visible(el) && enabled(el);
     default:
         return 0;
@@ -833,6 +842,38 @@ static size_t next_char(const char *t, size_t i)
     return i;
 }
 
+/* A slider's track: where its knob's middle can go */
+static void slider_track(olui *ui, const olui_el *el, int32_t *x0, int32_t *x1)
+{
+    olui_rect in = inside(ui, el, rect_of(ui, el));
+    *x0 = in.x + px(ui, el->cs.ol.padding_left);
+    *x1 = in.x + in.w - px(ui, el->cs.ol.padding_right);
+    if (*x1 <= *x0) *x1 = *x0 + 1;
+}
+
+static void slider_set(olui *ui, olui_el *el, int v)
+{
+    if (v < el->imin) v = el->imin;
+    if (v > el->imax) v = el->imax;
+    if (v == el->ivalue) return;
+    el->ivalue = v;
+    ui->damaged = 1;
+    {
+        char num[16];
+        snprintf(num, sizeof(num), "%d", v);
+        emit(ui, OLUI_CHANGE, el, NULL, num, v, 0);
+    }
+}
+
+static void slider_to(olui *ui, olui_el *el, int x)
+{
+    int32_t x0, x1, range = el->imax - el->imin;
+    slider_track(ui, el, &x0, &x1);
+    if (x < x0) x = x0;
+    if (x > x1) x = x1;
+    slider_set(ui, el, el->imin + (int)(((int64_t)(x - x0) * range * 2 + (x1 - x0)) / (2 * (int64_t)(x1 - x0))));
+}
+
 /* ---- Input ----------------------------------------------------------------------- */
 
 static void set_focus(olui *ui, olui_el *el)
@@ -866,6 +907,11 @@ int olui_mouse(olui *ui, int x, int y, int what)
             ui->hover = w;
             set_state(ui, w, S_HOVER, 1);
         }
+        /* a slider follows the pointer while it is held */
+        if (ui->pressed && ui->pressed->kind == K_SLIDER) {
+            slider_to(ui, ui->pressed, x);
+            return 1;
+        }
         /* a pressed button looks pressed only while the pointer is on it */
         if (ui->pressed) set_state(ui, ui->pressed, S_ACTIVE, ui->pressed == w);
         return w != NULL;
@@ -892,6 +938,7 @@ int olui_mouse(olui *ui, int x, int y, int what)
         } else if (w->kind != K_LIST) {
             ui->pressed = w;
             set_state(ui, w, S_ACTIVE, 1);
+            if (w->kind == K_SLIDER) slider_to(ui, w, x);
         }
         return 1;
     case OLUI_MOUSE_UP:
@@ -899,7 +946,7 @@ int olui_mouse(olui *ui, int x, int y, int what)
             olui_el *p = ui->pressed;
             ui->pressed = NULL;
             set_state(ui, p, S_ACTIVE, 0);
-            if (p == w) press(ui, p);
+            if (p == w && p->kind != K_SLIDER) press(ui, p);
             return 1;
         }
         return 0;
@@ -993,6 +1040,19 @@ int olui_key(olui *ui, unsigned code, unsigned qual)
             return 1;
         }
         return 0;
+    case K_SLIDER: {
+        int step = (f->imax - f->imin) / 10;
+        if (step < 1) step = 1;
+        switch (code) {
+        case OLUI_KEY_LEFT: case OLUI_KEY_DOWN: slider_set(ui, f, f->ivalue - 1); return 1;
+        case OLUI_KEY_RIGHT: case OLUI_KEY_UP: slider_set(ui, f, f->ivalue + 1); return 1;
+        case OLUI_KEY_PAGEDOWN: slider_set(ui, f, f->ivalue - step); return 1;
+        case OLUI_KEY_PAGEUP: slider_set(ui, f, f->ivalue + step); return 1;
+        case OLUI_KEY_HOME: slider_set(ui, f, f->imin); return 1;
+        case OLUI_KEY_END: slider_set(ui, f, f->imax); return 1;
+        default: return 0;
+        }
+    }
     case K_INPUT: {
         const char *t = f->text ? f->text : "";
         size_t len = strlen(t);
@@ -1263,7 +1323,7 @@ static void draw_el(drawer *d, const olui_el *el, int32_t dy, const olui_rect *c
     r = rect_of_node(ui, el->node);
     r.y -= dy;
     if (clip && !crosses(r, clip)) return;
-    if (el->kind != K_TEXT) out_box(d, el, r, &el->cs);
+    if (el->kind != K_TEXT && el->kind != K_SLIDER) out_box(d, el, r, &el->cs);   /* a slider's box is its knob */
 
     switch (el->kind) {
     case K_CHECK:
@@ -1296,6 +1356,26 @@ static void draw_el(drawer *d, const olui_el *el, int32_t dy, const olui_rect *c
             ? (int32_t)((int64_t)(in.w - px(ui, el->cs.ol.padding_left) - px(ui, el->cs.ol.padding_right)) * v / el->imax)
             : 0;
         if (bar.w > 0 && bar.h > 0) out_flat(d, el, bar, el->cs.accent, 0, 0, 0);
+        return;
+    }
+    case K_SLIDER: {
+        /* the track across the middle, filled to the value, and the knob on it */
+        olui_rect in = inside(ui, el, r), track, knob;
+        int32_t x0, x1, kx, range = el->imax - el->imin;
+        slider_track(ui, el, &x0, &x1);
+        kx = x0 + (range > 0 ? (int32_t)((int64_t)(x1 - x0) * (el->ivalue - el->imin) / range) : 0);
+        track.x = x0;
+        track.w = x1 - x0;
+        track.h = in.h / 4 > 3 ? in.h / 4 : 3;
+        track.y = in.y + (in.h - track.h) / 2;
+        out_flat(d, el, track, el->cs.mark_bg, el->cs.mark_border, 1, track.h / 2);
+        track.w = kx - x0;
+        if (track.w > 0) out_flat(d, el, track, enabled(el) ? el->cs.accent : el->cs.muted, 0, 0, track.h / 2);
+        knob.h = in.h;
+        knob.w = in.h * 3 / 4 > 6 ? in.h * 3 / 4 : 6;
+        knob.x = kx - knob.w / 2;
+        knob.y = in.y;
+        out_box(d, el, knob, &el->cs);
         return;
     }
     case K_ITEM:
@@ -1404,6 +1484,25 @@ void olui_set_checked(olui *ui, olui_el *el, int checked)
 
 void olui_set_disabled(olui *ui, olui_el *el, int disabled) { if (ui) set_state(ui, el, S_DISABLED, disabled); }
 void olui_set_hidden(olui *ui, olui_el *el, int hidden) { if (ui) set_state(ui, el, S_HIDDEN, hidden); }
+
+int olui_box(olui *ui, const olui_el *el, olui_rect *r)
+{
+    if (!ui || !el || !r || !el->node || !fresh(ui) || !visible(el)) return 0;
+    *r = rect_of(ui, el);
+    return 1;
+}
+
+int olui_slider_value(const olui_el *el) { return el ? el->ivalue : 0; }
+
+void olui_set_slider(olui *ui, olui_el *el, int value)
+{
+    if (!ui || !el || el->kind != K_SLIDER) return;
+    if (value < el->imin) value = el->imin;
+    if (value > el->imax) value = el->imax;
+    if (el->ivalue == value) return;
+    el->ivalue = value;
+    ui->damaged = 1;
+}
 
 void olui_set_progress(olui *ui, olui_el *el, int value)
 {

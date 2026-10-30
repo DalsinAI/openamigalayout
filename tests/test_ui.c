@@ -330,6 +330,41 @@ int main(int argc, char **argv)
     olui_set_progress(ui, bar, 7);
     CHECK(olui_damaged(ui, &r) && r.w == 520);
 
+    /* a slider: dragged, keyed and set; olui_box says where it is */
+    {
+        olui *sl = olui_new();
+        olui_el *red;
+        olui_rect b;
+        int was = changes;
+        CHECK(sl && olui_load(sl, "<row><label>Red</label><slider id=red min=0 max=255 value=100 style='flex:1'></row>",
+                              "slider{padding:0}", err, sizeof(err)));
+        CHECK(olui_on(sl, NULL, 0, on_event, NULL));
+        CHECK(olui_layout(sl, 300, 40));
+        red = olui_find(sl, "red");
+        CHECK(red && olui_slider_value(red) == 100);
+        CHECK(olui_box(sl, red, &b) && b.w > 100 && b.h > 0);
+        CHECK(olui_mouse(sl, b.x + b.w - 1, b.y + b.h / 2, OLUI_MOUSE_DOWN));
+        CHECK(olui_slider_value(red) == 255 && changes == was + 1 && !strcmp(last_value, "255"));
+        CHECK(olui_mouse(sl, b.x - 20, b.y + b.h / 2, OLUI_MOUSE_MOVE));    /* held: it follows past the end */
+        CHECK(olui_slider_value(red) == 0);
+        CHECK(olui_mouse(sl, b.x + b.w / 2, b.y + b.h / 2, OLUI_MOUSE_MOVE));
+        CHECK(olui_slider_value(red) >= 126 && olui_slider_value(red) <= 129);
+        CHECK(olui_mouse(sl, b.x + b.w / 2, b.y + b.h / 2, OLUI_MOUSE_UP));
+        CHECK(olui_mouse(sl, b.x + 2, b.y + b.h / 2, OLUI_MOUSE_MOVE) && olui_slider_value(red) > 100);   /* let go */
+        CHECK(olui_key(sl, OLUI_KEY_HOME, 0) && olui_slider_value(red) == 0);
+        CHECK(olui_key(sl, OLUI_KEY_RIGHT, 0) && olui_slider_value(red) == 1);
+        CHECK(olui_key(sl, OLUI_KEY_PAGEUP, 0) && olui_slider_value(red) == 26);
+        CHECK(olui_key(sl, OLUI_KEY_END, 0) && olui_slider_value(red) == 255);
+        was = changes;
+        olui_set_slider(sl, red, 300);
+        CHECK(olui_slider_value(red) == 255 && changes == was);
+        olui_set_slider(sl, red, 7);
+        CHECK(olui_slider_value(red) == 7 && changes == was);
+        olui_set_hidden(sl, red, 1);
+        CHECK(!olui_box(sl, red, &b) || b.w == 0);
+        olui_free(sl);
+    }
+
     /* a bad markup says where */
     {
         olui *bad = olui_new();
