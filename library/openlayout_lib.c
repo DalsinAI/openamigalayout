@@ -1,4 +1,4 @@
-/* openlayout.library 7.1: version 3 adds pages, tables, frames and the
+/* openlayout.library 8.0: version 3 adds pages, tables, frames and the
  * caret (OpenLayout 0.2) after version 2's calls, which are unchanged;
  * version 4 adds tab stops that align and their leaders (OpenLayout 0.3);
  * version 5 places frames anchored to their pages (OpenLayout 0.4, the
@@ -7,8 +7,10 @@
  * (OpenLayout 0.5); version 7 wraps the text round anchored frames (the
  * box style's wrap and wrap_gap, OpenLayout 0.6) and adds OL_FramePlace;
  * revision 7.1 lays out OL_BOX_EXACT_LINES (exact line spacing,
- * OpenLayout 0.7), a flag that 7.0 leaves out.
- * Programs built for 2 to 6 keep working.
+ * OpenLayout 0.7), a flag that 7.0 leaves out; version 8 lays out rows
+ * and the box style's width, height, grow, gap and align (OpenLayout 0.8,
+ * programs' windows), with no new calls.
+ * Programs built for 2 to 7 keep working.
  * Copyright (c) 2026 AmigaChrome Team. MIT.
  */
 #include <exec/types.h>
@@ -22,8 +24,8 @@
 #include "../include/libraries/openlayout.h"
 
 #define REG(r, decl) register decl __asm(#r)
-#define LIB_VERSION 7
-#define LIB_REVISION 1
+#define LIB_VERSION 8
+#define LIB_REVISION 0
 
 struct OpenLayoutLibBase {
     struct Library lib;
@@ -36,10 +38,10 @@ int start(void) { return -1; }
 
 static const char lib_name[] = OPENLAYOUTLIB_NAME;
 static const char lib_id[] =
-    "openlayout.library 7.1 (25.10.2026) OpenLayout 0.7, AmigaChrome Team\r\n";
+    "openlayout.library 8.0 (30.10.2026) OpenLayout 0.8, AmigaChrome Team\r\n";
 /* for Version and the file's version tag: lib_id has none */
 static const char lib_ver[] __attribute__((used)) =
-    "$VER: openlayout.library 7.1 (25.10.2026) OpenLayout 0.7, AmigaChrome Team";
+    "$VER: openlayout.library 8.0 (30.10.2026) OpenLayout 0.8, AmigaChrome Team";
 
 static struct Library *lib_init(REG(d0, struct OpenLayoutLibBase *base),
                                 REG(a0, BPTR seglist),

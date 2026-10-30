@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define OL_VERSION "0.7"
+#define OL_VERSION "0.8"
 
 /*
  * OpenLayout logical units are exact across the three worlds we care about:
@@ -253,7 +253,22 @@ enum {
      * its text is taller: the text stands on the line's bottom and its top
      * runs over the line above. Without it line_height is the least a line
      * is (a word processor's "at least"). */
-    OL_BOX_EXACT_LINES       = 1u << 5
+    OL_BOX_EXACT_LINES       = 1u << 5,
+    /* 0.8: the block's children side by side, left to right, as a CSS
+     * flex row (a program's toolbar, a row of buttons, a list beside its
+     * panel): each as wide as box.width, or as its content, sharing what
+     * room is left by box.grow (or giving up room in proportion when there
+     * is too little); as tall as the row (box.align); gap apart. A row
+     * with nothing that grows puts its children at its text_align. */
+    OL_BOX_ROW               = 1u << 6
+};
+
+/* 0.8: how a row's children stand across it (box.align) */
+enum {
+    OL_CROSS_STRETCH = 0,      /* as tall as the row */
+    OL_CROSS_START   = 1,      /* at its top */
+    OL_CROSS_CENTRE  = 2,
+    OL_CROSS_END     = 3
 };
 
 enum {
@@ -291,6 +306,23 @@ typedef struct {
      * frames have no wrap. */
     uint32_t wrap;
     ol_unit wrap_gap[4];
+    /* 0.8: programs' windows (CSS width, height, flex-grow, gap and
+     * align-items). Through openlayout.library, a program sets size to
+     * sizeof(ol_box_style) and opens version 8; with an older size these
+     * are 0 (not set).
+     * - width: the box's own width, margins outside it; 0: what its
+     *   containing block gives (in a row: its content's);
+     * - height: its own height; 0: its content's. A block's children that
+     *   grow share what its height leaves below them;
+     * - grow: in a row, its share of the room left across; in a block with
+     *   a height, its share of the room left below;
+     * - gap: between a row's children, and between a block's;
+     * - align: a row's children across it (OL_CROSS_...). */
+    ol_unit width;
+    ol_unit height;
+    int32_t grow;
+    ol_unit gap;
+    uint32_t align;
 } ol_box_style;
 
 /* An anchored frame (box.anchor not 0) is laid out on its own and placed
@@ -347,6 +379,9 @@ enum {
 /* The size of an ol_box_style before 0.6's wrap, as programs built for
  * openlayout.library 5 and 6 have it */
 #define OL_BOX_STYLE_SIZE_0_5 offsetof(ol_box_style, wrap)
+/* The size of an ol_box_style before 0.8's width, height, grow, gap and
+ * align, as programs built for openlayout.library 7 have it */
+#define OL_BOX_STYLE_SIZE_0_7 offsetof(ol_box_style, width)
 
 /* 0.6: where an anchored frame went after ol_layout_pages (or ol_layout,
  * in the galley): its page and its rectangle on it, the frame's width and

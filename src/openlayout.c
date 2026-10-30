@@ -32,6 +32,7 @@ struct ol_node {
     ol_unit *tabs;
     unsigned char *tab_info;  /* each stop's ol_tab_align | ol_tab_leader << 4 */
     int tab_count;
+    ol_unit force_height;     /* 0.8: the height its row or block gives it this pass; 0: none */
 };
 
 /* A stretch of the galley a page may not end inside: a line, a table row,
@@ -1514,16 +1515,260 @@ static int layout_table(ol_document *doc, ol_node *table, ol_unit x, ol_unit y,
     return 1;
 }
 
-static int layout_block(ol_document *doc, ol_node *node,
-                        ol_unit x, ol_unit y, ol_unit width,
-                        ol_measure_text_fn measure, void *measure_userdata,
-                        ol_unit *bottom_out)
+/* 0.8: what a layout has added so far, to take back and lay out again */
+typedef struct {
+    size_t ops, keeps, breaks, anchors;
+} ol_mark;
+
+static void mark_take(const ol_document *doc, ol_mark *m)
 {
-    ol_unit box_x, box_y, inner_x, inner_w, current_y, content_bottom, empty_top;
+    m->ops = doc->op_count;
+    m->keeps = doc->keep_count;
+    m->breaks = doc->break_count;
+    m->anchors = doc->anchor_count;
+}
+
+static void mark_back(ol_document *doc, const ol_mark *m)
+{
+    doc->op_count = m->ops;
+    doc->keep_count = m->keeps;
+    doc->break_count = m->breaks;
+    doc->anchor_count = m->anchors;
+}
+
+static int is_grower(const ol_node *n)
+{
+    return n->style.display != OL_DISPLAY_NONE && !is_frame(n) && n->box.grow > 0;
+}
+
+/* 0.8: how wide a node is with nothing wrapped: its text on one line (the
+ * longest of its lines), its inline children run on together, its block
+ * children's widest, a row's children side by side; its padding and
+ * margins round that. A box.width is its width. */
+static ol_unit content_width(ol_document *doc, const ol_node *node,
+                             ol_measure_text_fn measure, void *measure_userdata)
+{
+    ol_unit w = 0, run = 0, ml, mr;
+    const ol_node *c;
+    int n = 0;
+    if (!node || node->style.display == OL_DISPLAY_NONE || is_frame(node)) return 0;
+    ml = node->style.margin_left;
+    mr = node->style.margin_right;
+    if (node->box.width > 0) return node->box.width + ml + mr;
+    if (node->text && node->text[0]) {
+        const char *t = node->text;
+        while (*t) {
+            ol_text_metrics m;
+            size_t len = strcspn(t, "\n");
+            memset(&m, 0, sizeof(m));
+            if (len && measure_with(measure, measure_userdata, t, len, &node->style, &m) &&
+                m.width > run)
+                run = m.width;
+            t += len;
+            if (*t) ++t;
+        }
+    }
+    if (node->role == OL_ROLE_IMAGE) run += node->image_width;
+    for (c = node->first_child; c; c = c->next_sibling) {
+        ol_unit cw;
+        if (c->style.display == OL_DISPLAY_NONE || is_frame(c)) continue;
+        cw = content_width(doc, c, measure, measure_userdata);
+        if (node->box.flags & OL_BOX_ROW) {
+            w += cw + (n++ ? node->box.gap : 0);
+        } else if (c->style.display == OL_DISPLAY_INLINE) {
+            run += cw;
+        } else {
+            if (run > w) w = run;
+            run = 0;
+            if (cw > w) w = cw;
+        }
+    }
+    if (run > w) w = run;
+    if (node->role == OL_ROLE_TABLE && node->column_count) {
+        int i;
+        ol_unit sum = 0;
+        for (i = 0; i < node->column_count; ++i) sum += node->columns[i];
+        if (sum > w) w = sum;
+    }
+    return w + node->style.padding_left + node->style.padding_right + ml + mr;
+}
+
+static int layout_block_in(ol_document *doc, ol_node *node,
+                           ol_unit x, ol_unit y, ol_unit width,
+                           ol_measure_text_fn measure, void *measure_userdata,
+                           ol_unit *bottom_out);
+
+/* 0.8: a row's children side by side (OL_BOX_ROW). Each is as wide as
+ * its box.width or its content; what room is left goes to those that grow,
+ * in proportion to box.grow, and with too little room those without a
+ * width give it up in proportion to theirs. Laid out once to find the
+ * row's height, and again only when a child must be as tall as the row or
+ * stand lower in it. */
+static int layout_row(ol_document *doc, ol_node *row, ol_unit x, ol_unit y, ol_unit width,
+                      ol_measure_text_fn measure, void *measure_userdata, ol_unit *bottom_out)
+{
+    ol_node *c;
+    ol_unit used = 0, flex = 0, left, cx, row_h = 0, fixed_h;
+    int32_t grow = 0;
+    int n = 0, pass, again = 0;
+    ol_mark mark;
+
+    for (c = row->first_child; c; c = c->next_sibling) {
+        if (c->style.display == OL_DISPLAY_NONE || is_frame(c)) continue;
+        c->force_height = 0;
+        /* the width it asks for, kept in its bounds until it is laid out */
+        c->bounds.width = content_width(doc, c, measure, measure_userdata);
+        used += c->bounds.width;
+        if (c->box.width <= 0) flex += c->bounds.width;
+        if (c->box.grow > 0) grow += c->box.grow;
+        ++n;
+    }
+    if (!n) {
+        *bottom_out = y;
+        return 1;
+    }
+    used += row->box.gap * (n - 1);
+    left = width - used;
+    cx = x;
+    if (left > 0 && !grow) {
+        if (row->style.text_align == OL_ALIGN_CENTER) cx += left / 2;
+        else if (row->style.text_align == OL_ALIGN_END) cx += left;
+    }
+    {
+        ol_unit share_left = left;
+        int32_t grow_left = grow;
+        ol_unit flex_left = flex;
+        for (c = row->first_child; c; c = c->next_sibling) {
+            ol_unit w = c->bounds.width, d = 0;
+            if (c->style.display == OL_DISPLAY_NONE || is_frame(c)) continue;
+            if (left > 0 && c->box.grow > 0) {
+                /* the last that grows takes what rounding left over */
+                d = grow_left == c->box.grow ? share_left
+                                             : (ol_unit)((int64_t)left * c->box.grow / grow);
+                grow_left -= c->box.grow;
+            } else if (left < 0 && c->box.width <= 0 && flex > 0) {
+                d = flex_left == w ? share_left : (ol_unit)((int64_t)left * w / flex);
+                flex_left -= w;
+            }
+            if ((left > 0 && c->box.grow > 0) || (left < 0 && c->box.width <= 0 && flex > 0))
+                share_left -= d;
+            w += d;
+            if (w < OL_CSSPX(1)) w = OL_CSSPX(1);
+            c->bounds.x = w;                /* its width, until it is laid out */
+        }
+    }
+
+    fixed_h = row->force_height > 0 ? row->force_height : row->box.height;
+    if (fixed_h > 0) {
+        row_h = fixed_h - row->style.padding_top - row->style.padding_bottom;
+        if (row_h < 0) row_h = 0;
+    }
+    mark_take(doc, &mark);
+    for (pass = 0; pass < 2; ++pass) {
+        ol_unit at = cx, tallest = 0;
+        for (c = row->first_child; c; c = c->next_sibling) {
+            ol_unit w, bottom, top = y, h;
+            if (c->style.display == OL_DISPLAY_NONE || is_frame(c)) continue;
+            w = pass ? c->bounds.width + c->style.margin_left + c->style.margin_right
+                     : c->bounds.x;
+            if (pass) {
+                h = c->bounds.height + c->style.margin_top + c->style.margin_bottom;
+                switch (row->box.align) {
+                case OL_CROSS_START: break;
+                case OL_CROSS_CENTRE: top += (row_h - h) / 2; break;
+                case OL_CROSS_END: top += row_h - h; break;
+                default:
+                    c->force_height = row_h - c->style.margin_top - c->style.margin_bottom;
+                    if (c->force_height < OL_CSSPX(1)) c->force_height = OL_CSSPX(1);
+                    break;
+                }
+            }
+            if (!layout_block_in(doc, c, at, top, w, measure, measure_userdata, &bottom)) return 0;
+            c->force_height = 0;
+            if (bottom - y > tallest) tallest = bottom - y;
+            if (!pass) {
+                h = c->bounds.height + c->style.margin_top + c->style.margin_bottom;
+                if (fixed_h <= 0 && h > row_h) row_h = h;
+            }
+            at += w + row->box.gap;
+        }
+        if (pass) break;
+        /* again when one is not as tall as the row, or must stand lower in it */
+        for (c = row->first_child; c && !again; c = c->next_sibling) {
+            ol_unit h;
+            if (c->style.display == OL_DISPLAY_NONE || is_frame(c)) continue;
+            h = c->bounds.height + c->style.margin_top + c->style.margin_bottom;
+            if (h != row_h && row->box.align != OL_CROSS_START) again = 1;
+        }
+        if (!again) {
+            if (fixed_h <= 0 && tallest > row_h) row_h = tallest;
+            break;
+        }
+        mark_back(doc, &mark);
+    }
+    /* the row is one stretch a page may not cut */
+    doc->keep_count = mark.keeps;
+    doc->break_count = mark.breaks;
+    if (!add_keep(doc, y, y + row_h)) return 0;
+    *bottom_out = y + row_h;
+    return 1;
+}
+
+/* A block's own text and its children, one under another from *y; with
+ * 0.8's gap between its blocks. */
+static int layout_children(ol_document *doc, ol_node *node, ol_inline_flow *flow,
+                           ol_unit inner_x, ol_unit inner_w, ol_unit *y,
+                           ol_measure_text_fn measure, void *measure_userdata)
+{
+    ol_unit keep_with_next = 0, current_y = *y;
+    int has_keep_with_next = 0, blocks = 0;
+    ol_node *child;
+
+    if (node->text && node->text[0]) {
+        if (!layout_inline_text(flow, node)) return 0;
+    }
+    for (child = node->first_child; child; child = child->next_sibling) {
+        if (child->style.display == OL_DISPLAY_NONE || is_frame(child)) continue;
+        if (child->style.display == OL_DISPLAY_INLINE) {
+            if (!layout_inline_node(flow, child)) return 0;
+        } else {
+            ol_unit child_bottom, w = inner_w;
+            size_t keeps_before;
+            if (!flush_flow(flow, &current_y)) return 0;
+            if (blocks++) current_y += node->box.gap;
+            keeps_before = doc->keep_count;
+            if (child->box.width > 0 &&
+                child->box.width + child->style.margin_left + child->style.margin_right < w)
+                w = child->box.width + child->style.margin_left + child->style.margin_right;
+            if (!layout_block_in(doc, child, inner_x, current_y, w,
+                                 measure, measure_userdata, &child_bottom))
+                return 0;
+            /* a heading stays with the next block's first line */
+            if (has_keep_with_next && doc->keep_count > keeps_before) {
+                if (!add_keep(doc, keep_with_next, doc->keeps[keeps_before].bottom)) return 0;
+                has_keep_with_next = 0;
+            }
+            if ((child->box.flags & OL_BOX_KEEP_WITH_NEXT) && doc->keep_count > keeps_before) {
+                keep_with_next = doc->keeps[doc->keep_count - 1].top;
+                has_keep_with_next = 1;
+            }
+            current_y = child_bottom;
+            start_flow(flow, doc, node, measure, measure_userdata, inner_x, inner_x + inner_w,
+                       current_y, node->style.text_align, 0);
+        }
+    }
+    *y = current_y;
+    return 1;
+}
+
+static int layout_block_in(ol_document *doc, ol_node *node,
+                           ol_unit x, ol_unit y, ol_unit width,
+                           ol_measure_text_fn measure, void *measure_userdata,
+                           ol_unit *bottom_out)
+{
+    ol_unit box_x, box_y, inner_x, inner_w, current_y, content_bottom, empty_top, fixed_h;
     ol_unit ml = node ? node->style.margin_left : 0, mr = node ? node->style.margin_right : 0;
     ol_unit mt = node ? node->style.margin_top : 0, mb = node ? node->style.margin_bottom : 0;
-    ol_unit keep_with_next = 0;
-    int has_keep_with_next = 0;
     ol_node *child;
     ol_inline_flow flow;
     size_t background_index = (size_t)-1, keeps_at_start;
@@ -1536,6 +1781,7 @@ static int layout_block(ol_document *doc, ol_node *node,
     keeps_at_start = doc->keep_count;
     if (is_frame(node)) ml = mr = mt = mb = 0;   /* a frame is where it is put */
     if ((node->box.flags & OL_BOX_PAGE_BREAK_BEFORE) && !add_break(doc, y)) return 0;
+    fixed_h = node->force_height > 0 ? node->force_height : node->box.height;
 
     box_x = x + ml;
     box_y = y + mt;
@@ -1565,37 +1811,57 @@ static int layout_block(ol_document *doc, ol_node *node,
         --doc->wrap_off;
         if (!ok) return 0;
         flow.line_top = current_y;
+    } else if (node->box.flags & OL_BOX_ROW) {
+        if (fixed_h > 0) node->force_height = fixed_h;
+        if (!layout_row(doc, node, inner_x, current_y, inner_w, measure, measure_userdata,
+                        &current_y))
+            return 0;
+        flow.line_top = current_y;
     } else {
-        if (node->text && node->text[0]) {
-            if (!layout_inline_text(&flow, node)) return 0;
-        }
-        for (child = node->first_child; child; child = child->next_sibling) {
-            if (child->style.display == OL_DISPLAY_NONE || is_frame(child)) continue;
-            if (child->style.display == OL_DISPLAY_INLINE) {
-                if (!layout_inline_node(&flow, child)) return 0;
-            } else {
-                ol_unit child_bottom;
-                size_t keeps_before;
-                if (!flush_flow(&flow, &current_y)) return 0;
-                keeps_before = doc->keep_count;
-                if (!layout_block(doc, child, inner_x, current_y, inner_w,
-                                  measure, measure_userdata, &child_bottom))
-                    return 0;
-                /* a heading stays with the next block's first line */
-                if (has_keep_with_next && doc->keep_count > keeps_before) {
-                    if (!add_keep(doc, keep_with_next, doc->keeps[keeps_before].bottom)) return 0;
-                    has_keep_with_next = 0;
+        ol_unit start_y = current_y;
+        ol_mark mark;
+        int growers = 0;
+        if (fixed_h > 0)
+            for (child = node->first_child; child; child = child->next_sibling)
+                if (is_grower(child)) { child->force_height = 0; ++growers; }
+        mark_take(doc, &mark);
+        if (!layout_children(doc, node, &flow, inner_x, inner_w, &current_y,
+                             measure, measure_userdata))
+            return 0;
+        if (growers) {
+            /* 0.8: what the height leaves below them, shared by those that grow */
+            ol_unit end_y, left;
+            int32_t grow = 0;
+            if (!flush_flow(&flow, &end_y)) return 0;
+            if (end_y < current_y) end_y = current_y;
+            left = box_y + fixed_h - node->style.padding_bottom - end_y;
+            if (left > 0) {
+                ol_unit share_left = left;
+                for (child = node->first_child; child; child = child->next_sibling)
+                    if (is_grower(child)) grow += child->box.grow;
+                for (child = node->first_child; child; child = child->next_sibling) {
+                    ol_unit d;
+                    if (!is_grower(child)) continue;
+                    d = grow == child->box.grow ? share_left
+                                                : (ol_unit)((int64_t)left * child->box.grow / grow);
+                    grow -= child->box.grow;
+                    share_left -= d;
+                    left = share_left;      /* what the next ones share, in proportion */
+                    child->force_height = child->bounds.height + d;
                 }
-                if ((child->box.flags & OL_BOX_KEEP_WITH_NEXT) && doc->keep_count > keeps_before) {
-                    keep_with_next = doc->keeps[doc->keep_count - 1].top;
-                    has_keep_with_next = 1;
-                }
-                current_y = child_bottom;
+                mark_back(doc, &mark);
+                current_y = start_y;
                 start_flow(&flow, doc, node, measure, measure_userdata, inner_x, inner_x + inner_w,
-                           current_y, node->style.text_align, 0);
+                           current_y, node->style.text_align, node->box.text_indent);
+                if (!layout_children(doc, node, &flow, inner_x, inner_w, &current_y,
+                                     measure, measure_userdata))
+                    return 0;
             }
+            for (child = node->first_child; child; child = child->next_sibling)
+                child->force_height = 0;
         }
     }
+    node->force_height = 0;
 
     if (!flush_flow(&flow, &content_bottom)) return 0;
     if (content_bottom < current_y) content_bottom = current_y;
@@ -1612,6 +1878,7 @@ static int layout_block(ol_document *doc, ol_node *node,
     /* 0.6: where its first line went (below a frame, say), for the page its frames go on */
     first_line = doc->keep_count > keeps_at_start ? doc->keeps[keeps_at_start].top
                                                   : box_y + node->style.padding_top;
+    if (fixed_h > 0) content_bottom = box_y + fixed_h - node->style.padding_bottom;  /* 0.8 */
     content_bottom += node->style.padding_bottom;
 
     node->bounds.x = box_x;
@@ -1640,6 +1907,14 @@ static int layout_block(ol_document *doc, ol_node *node,
     *bottom_out = is_frame(node) ? node->bounds.y + node->bounds.height
                                  : content_bottom + mb;
     return 1;
+}
+
+static int layout_block(ol_document *doc, ol_node *node,
+                        ol_unit x, ol_unit y, ol_unit width,
+                        ol_measure_text_fn measure, void *measure_userdata,
+                        ol_unit *bottom_out)
+{
+    return layout_block_in(doc, node, x, y, width, measure, measure_userdata, bottom_out);
 }
 
 /* The document's children, one under another, as the galley. */

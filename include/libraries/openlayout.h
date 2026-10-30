@@ -16,6 +16,9 @@
 #define OPENLAYOUTLIB_WRAP_VERSION 7        /* text round anchored frames: ol_box_style's wrap and wrap_gap, with
                                                the size the program sets (OL_BoxStyleInit stops before them);
                                                where a frame went: OL_FramePlace */
+#define OPENLAYOUTLIB_ROW_VERSION 8         /* programs' windows: OL_BOX_ROW and ol_box_style's width, height, grow,
+                                               gap and align, with the size the program sets (OL_BoxStyleInit
+                                               stops before them) */
 
 struct OLNodeAppend {
     ol_document *document;

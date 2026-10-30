@@ -64,12 +64,36 @@ tab's text op, `OL_TEXT_LEADER_OF(op->u.text.style.text_flags)`, for the
 renderer to draw across the op's bounds. `ol_node_set_tabs` still sets
 left stops without leaders.
 
+## Rows, and programs' windows (0.8)
+
+`OL_BOX_ROW` lays a box's children side by side, as a CSS flex row: each
+as wide as its `box.width` or its content, sharing the room left by
+`box.grow` (or giving room up in proportion when there is too little),
+`box.gap` apart, as tall as the row or at its top, middle or bottom
+(`box.align`). A box with a `box.height` shares what its children leave
+below them among those that grow. `openlayout.library` 8.0 lays these out,
+with no new calls (`OPENLAYOUTLIB_ROW_VERSION`).
+
+On them sits **OpenLayout UI** (`include/openlayout_ui.h`, `ui/`, `amiga/`):
+a program's window described in HTML and CSS, laid out by OpenLayout,
+drawn in the OpenGadTools theme, with its events in the program's C
+functions. Buttons, checkboxes, radio buttons, fields, lists and trees,
+tabs and progress bars. [docs/OpenLayout-UI.md](docs/OpenLayout-UI.md)
+describes it; `examples/OLUIDemo.c` is a whole program.
+
 ## Build and test
 
 Host:
 
 ```sh
-make test
+make test                                   # OpenLayout, and the UI without a theme reader
+make test OGT_ROOT=<opengadtools>           # the UI with OpenGadTools' theme reader
+```
+
+OpenLayout UI for the Amiga (`libolui.a`, `OLUIDemo`, `OLUITest`, `OLRowsTest`), soft float:
+
+```sh
+OGT_ROOT=<opengadtools> SPECS=<SDK>/Lib/m68k-soft-m68040.specs ./build-ui-amiga.sh
 ```
 
 Amiga static target:
@@ -103,7 +127,7 @@ Resident Amiga library and ABI test:
 ./build-library.sh
 ```
 
-The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup. The current ABI is `openlayout.library` 7.1. Version 2 added the node inspection vectors required by shared renderers and automation; version 3 adds the document calls (pages, tables, frames, tab stops, the caret, the display scale and `OL_DrawPage`) after them, so programs built for version 2 keep working; version 4 adds `OL_NodeSetTabStops` after those; version 5 places frames anchored to their pages (`box.anchor`, OpenLayout 0.4) with no new calls; version 6 adds `OL_DocumentReserve` (OpenLayout 0.5); version 7 wraps text round anchored frames (`box.wrap`, OpenLayout 0.6) and adds `OL_FramePlace` (where a frame went); revision 7.1 lays a block's lines out exactly its line height with `OL_BOX_EXACT_LINES` (OpenLayout 0.7), a flag 7.0 ignores. A program that uses the document calls opens `OPENLAYOUTLIB_DOCUMENT_VERSION` (3), one that sets aligned tab stops `OPENLAYOUTLIB_TABSTOP_VERSION` (4), one that anchors frames `OPENLAYOUTLIB_ANCHOR_VERSION` (5), one that reserves the display list's room `OPENLAYOUTLIB_RESERVE_VERSION` (6), and one that wraps text round frames `OPENLAYOUTLIB_WRAP_VERSION` (7). The library's `OL_BoxStyleInit` fills only the `ol_box_style` that programs built for 3 and 4 have (`OL_BOX_STYLE_SIZE_0_3` bytes), so it never writes past theirs; a program that anchors a frame then sets `size` to `sizeof(ol_box_style)` and `anchor` (and `wrap` and `wrap_gap`).
+The resident build produces `build-amiga/lib/openlayout.library` plus the public `libraries/`, `proto/` and `inline/` headers. It uses a process-free Exec allocation runtime so documents owned by the resident library do not depend on a caller's libc startup. The current ABI is `openlayout.library` 8.0. Version 2 added the node inspection vectors required by shared renderers and automation; version 3 adds the document calls (pages, tables, frames, tab stops, the caret, the display scale and `OL_DrawPage`) after them, so programs built for version 2 keep working; version 4 adds `OL_NodeSetTabStops` after those; version 5 places frames anchored to their pages (`box.anchor`, OpenLayout 0.4) with no new calls; version 6 adds `OL_DocumentReserve` (OpenLayout 0.5); version 7 wraps text round anchored frames (`box.wrap`, OpenLayout 0.6) and adds `OL_FramePlace` (where a frame went); revision 7.1 lays a block's lines out exactly its line height with `OL_BOX_EXACT_LINES` (OpenLayout 0.7), a flag 7.0 ignores; version 8 lays out rows and the box style's width, height, grow, gap and align (OpenLayout 0.8), with no new calls. A program that uses the document calls opens `OPENLAYOUTLIB_DOCUMENT_VERSION` (3), one that sets aligned tab stops `OPENLAYOUTLIB_TABSTOP_VERSION` (4), one that anchors frames `OPENLAYOUTLIB_ANCHOR_VERSION` (5), one that reserves the display list's room `OPENLAYOUTLIB_RESERVE_VERSION` (6), one that wraps text round frames `OPENLAYOUTLIB_WRAP_VERSION` (7), and one that lays out rows `OPENLAYOUTLIB_ROW_VERSION` (8). The library's `OL_BoxStyleInit` fills only the `ol_box_style` that programs built for 3 and 4 have (`OL_BOX_STYLE_SIZE_0_3` bytes), so it never writes past theirs; a program that anchors a frame then sets `size` to `sizeof(ol_box_style)` and `anchor` (and `wrap` and `wrap_gap`).
 
 The OS 3.2.3 / AC090 68040 qualification opens the library from `LIBS:` and runs both the normal ABI test and a 48-node stress test covering allocation growth, metadata, image nodes, layout and display-list access.
 
