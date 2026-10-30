@@ -136,7 +136,9 @@ wheel scrolls a list.
 The Amiga glue (`include/openlayout_ui_amiga.h`): `olui_amiga_idcmp()`,
 `olui_amiga_new(ui, window)`, `olui_amiga_theme(a, path or NULL)`,
 `olui_amiga_layout(a)`, `olui_amiga_event(a, msg)`, `olui_amiga_draw(a)`,
-`olui_amiga_free(a)`. It draws into a buffer the size of the window's
+`olui_amiga_free(a)`; `olui_amiga_own(a, el, fn, data)` for a widget the
+program draws itself (a box the buffer is copied around, up to four), and
+`olui_amiga_fonts(a, font, mono)` for the fonts text is drawn in. It draws into a buffer the size of the window's
 inside, a simple layer on a bitmap like the window's, and copies it to the
 window in one blit, so nothing flickers.
 
@@ -184,6 +186,6 @@ A program links `libolui.a` and includes `openlayout_ui.h` and
 
 - Text selection in a field, the clipboard, and multi-line text editing.
 - Menus, pop-up choosers, sliders and number fields.
-- Pictures: `img` keeps the place, and the program draws there.
+- Pictures: `img` keeps the place, and the program draws there (or draws a box itself with `olui_amiga_own`).
 - A resident library: it is a link library for now.
 - Laying out only what changed: each change lays the whole window out.

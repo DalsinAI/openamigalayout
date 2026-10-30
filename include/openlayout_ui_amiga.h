@@ -45,6 +45,18 @@ void olui_amiga_free(olui_amiga *a);
  * SYS:Prefs/Presets/Themes). 1 when one was read. */
 int olui_amiga_theme(olui_amiga *a, const char *path);
 
+/* A widget the program draws itself (a div with a background, so it has a
+ * box): the buffer is copied to the window around it, and fn is called
+ * with its box in the window's RastPort's pixels each time the window is
+ * drawn, to draw it there. fn NULL gives it back. Four at most; 1 when it
+ * was taken. */
+typedef void (*olui_amiga_own_fn)(void *userdata, const olui_el *el, int x, int y, int w, int h);
+int olui_amiga_own(olui_amiga *a, const olui_el *el, olui_amiga_own_fn fn, void *userdata);
+
+/* The fonts text is drawn in (names as diskfont.library takes them, "x.font"):
+ * the screen's and topaz.font at first. NULL keeps one. */
+void olui_amiga_fonts(olui_amiga *a, const char *font, const char *mono);
+
 /* Lays out at the window's inner size, and draws it all. */
 int olui_amiga_layout(olui_amiga *a);
 /* Draws what changed, if anything did. */

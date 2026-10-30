@@ -47,6 +47,7 @@ static struct Library *CyberGfxBase;
 
 #define MAX_PENS 96
 #define MAX_FONTS 12
+#define MAX_OWN 4
 #define THEME_DIR "SYS:Prefs/Presets/Themes/"
 
 /* rawkeys */
@@ -93,6 +94,16 @@ struct olui_amiga {
     ULONG down_secs, down_micros;
     int down_x, down_y;
     unsigned qual;
+    /* the widgets the program draws itself, and where they were drawn (the buffer's pixels) */
+    struct {
+        const olui_el *el;
+        olui_amiga_own_fn fn;
+        void *data;
+        olui_rect box;
+        int seen;
+    } own[MAX_OWN];
+    int nown;
+    char mono_name[64];
 };
 
 /* ---- Colours ---------------------------------------------------------------- */
@@ -236,7 +247,7 @@ static struct TextFont *font_for(olui_amiga *a, int px, unsigned style)
     if (px < 6) px = 6;
     for (i = 0; i < a->nfonts; ++i)
         if (a->fonts[i].px == px && a->fonts[i].style == style) return a->fonts[i].tf;
-    ta.ta_Name = (STRPTR)((style & OL_TEXT_MONO) ? "topaz.font" : a->font_name);
+    ta.ta_Name = (STRPTR)((style & OL_TEXT_MONO) ? a->mono_name : a->font_name);
     ta.ta_YSize = (UWORD)px;
     ta.ta_Style = (style & OL_TEXT_BOLD) ? FSF_BOLD : FS_NORMAL;
     ta.ta_Flags = 0;
@@ -441,6 +452,11 @@ static void draw_op(void *userdata, const olui_draw_op *op)
     case OLUI_DRAW_CLIP: set_clip(a, op->clip.w > 0 ? &op->clip : NULL); break;
     default: break;
     }
+    if (op->kind == OLUI_DRAW_BOX && op->el) {
+        int i;
+        for (i = 0; i < a->nown; ++i)
+            if (a->own[i].el == op->el) { a->own[i].box = op->box; a->own[i].seen = 1; }
+    }
 }
 
 /* ---- The buffer ------------------------------------------------------------------ */
@@ -486,16 +502,48 @@ static int make_buffer(olui_amiga *a)
     return 1;
 }
 
+/* The buffer to the window, around the widgets the program draws itself;
+ * then it draws them (olui_amiga_own). */
 static void show(olui_amiga *a)
 {
-    if (a->bm)
-        BltBitMapRastPort(a->bm, 0, 0, a->win->RPort, a->win->BorderLeft, a->win->BorderTop, a->bw, a->bh, 0xc0);
+    struct Region *r;
+    struct RegionRectangle *rr;
+    struct Rectangle rect;
+    int i, x0 = a->win->BorderLeft, y0 = a->win->BorderTop;
+    int seen = 0;
+    if (!a->bm) return;
+    for (i = 0; i < a->nown; ++i) seen += a->own[i].seen;
+    if (!seen || !(r = NewRegion())) {
+        BltBitMapRastPort(a->bm, 0, 0, a->win->RPort, x0, y0, a->bw, a->bh, 0xc0);
+    } else {
+        rect.MinX = 0; rect.MinY = 0; rect.MaxX = (WORD)(a->bw - 1); rect.MaxY = (WORD)(a->bh - 1);
+        OrRectRegion(r, &rect);
+        for (i = 0; i < a->nown; ++i) {
+            const olui_rect *b = &a->own[i].box;
+            if (!a->own[i].seen) continue;
+            rect.MinX = (WORD)b->x; rect.MinY = (WORD)b->y;
+            rect.MaxX = (WORD)(b->x + b->w - 1); rect.MaxY = (WORD)(b->y + b->h - 1);
+            ClearRectRegion(r, &rect);
+        }
+        for (rr = r->RegionRectangle; rr; rr = rr->Next) {
+            int x = r->bounds.MinX + rr->bounds.MinX, y = r->bounds.MinY + rr->bounds.MinY;
+            BltBitMapRastPort(a->bm, x, y, a->win->RPort, x0 + x, y0 + y, rr->bounds.MaxX - rr->bounds.MinX + 1,
+                              rr->bounds.MaxY - rr->bounds.MinY + 1, 0xc0);
+        }
+        DisposeRegion(r);
+    }
+    for (i = 0; i < a->nown; ++i)
+        if (a->own[i].seen)
+            a->own[i].fn(a->own[i].data, a->own[i].el, x0 + a->own[i].box.x, y0 + a->own[i].box.y, a->own[i].box.w,
+                         a->own[i].box.h);
 }
 
 static void draw_all(olui_amiga *a)
 {
+    int i;
     if (!make_buffer(a)) return;
     a->clipped = 0;
+    for (i = 0; i < a->nown; ++i) a->own[i].seen = 0;
     olui_draw(a->ui, NULL, draw_op, a);
     set_clip(a, NULL);
     show(a);
@@ -523,6 +571,7 @@ olui_amiga *olui_amiga_new(olui *ui, struct Window *win)
     if (!CyberGfxBase) CyberGfxBase = OpenLibrary((STRPTR)"cybergraphics.library", 40);
     InitRastPort(&a->mrp);
     strncpy(a->font_name, (const char *)a->scr->Font->ta_Name, sizeof(a->font_name) - 1);
+    strcpy(a->mono_name, "topaz.font");
     olui_set_measure(ui, measure, a);
     return a;
 }
@@ -538,6 +587,32 @@ void olui_amiga_free(olui_amiga *a)
     for (i = 0; i < a->npens; ++i) ReleasePen(a->scr->ViewPort.ColorMap, a->pens[i].pen);
     FreeVec(a);
     /* cybergraphics.library stays open with the program: the next window may want it */
+}
+
+int olui_amiga_own(olui_amiga *a, const olui_el *el, olui_amiga_own_fn fn, void *userdata)
+{
+    int i;
+    if (!a || !el) return 0;
+    for (i = 0; i < a->nown && a->own[i].el != el; ++i) ;
+    if (!fn) {
+        if (i < a->nown) { memmove(&a->own[i], &a->own[i + 1], sizeof(a->own[0]) * (size_t)(a->nown - i - 1)); --a->nown; }
+        return 1;
+    }
+    if (i == MAX_OWN) return 0;
+    if (i == a->nown) ++a->nown;
+    a->own[i].el = el;
+    a->own[i].fn = fn;
+    a->own[i].data = userdata;
+    a->own[i].seen = 0;
+    return 1;
+}
+
+void olui_amiga_fonts(olui_amiga *a, const char *font, const char *mono)
+{
+    if (!a) return;
+    while (a->nfonts > 0) CloseFont(a->fonts[--a->nfonts].tf);
+    if (font && font[0]) { strncpy(a->font_name, font, sizeof(a->font_name) - 1); a->font_name[sizeof(a->font_name) - 1] = 0; }
+    if (mono && mono[0]) { strncpy(a->mono_name, mono, sizeof(a->mono_name) - 1); a->mono_name[sizeof(a->mono_name) - 1] = 0; }
 }
 
 static char *load_text(const char *path)
