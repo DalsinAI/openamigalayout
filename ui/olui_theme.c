@@ -137,6 +137,15 @@ char *olui_theme_css(const char *theme_text, int dark, char *err, size_t errlen)
     colour(&b, &t, mode, "color", "button.text");
     border(&b, &t, mode, "button.border");
     radius(&b, &t, mode, "button.radius");
+    put(&b, "}\nslider{");
+    gradient(&b, &t, mode, "button", 0);
+    border(&b, &t, mode, "button.border");
+    radius(&b, &t, mode, "button.radius");
+    colour(&b, &t, mode, "accent-color", "accent");
+    colour(&b, &t, mode, "mark-background", "track");
+    colour(&b, &t, mode, "mark-border-color", "string.shadow");
+    put(&b, "}\nslider:focus{");
+    colour(&b, &t, mode, "mark-border-color", "accent");
     put(&b, "}\nbutton:active{");
     gradient(&b, &t, mode, "button", 1);
     put(&b, "}\nbutton:focus,checkbox:focus,radio:focus,list:focus,tabbutton:focus,input:focus{");

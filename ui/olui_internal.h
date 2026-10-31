@@ -20,7 +20,8 @@ enum {
     K_STRIP,        /* a tabs' row of tab buttons (made, not written) */
     K_TABBTN,       /* a tab button in the strip (made) */
     K_PROGRESS,
-    K_IMAGE
+    K_IMAGE,
+    K_SLIDER        /* a value from min to max, dragged or keyed */
 };
 
 /* States: what the :pseudo-classes match */
@@ -57,7 +58,8 @@ struct olui_el {
     char tag[16];
     char *id, *cls, *name, *value, *text, *style, *placeholder, *title;
     unsigned state;
-    int ivalue, imax;           /* progress; an image's number and size (ivalue, w, h) */
+    int ivalue, imax;           /* progress, a slider's value; an image's number and size (ivalue, w, h) */
+    int imin;                   /* a slider's least value */
     int img_w, img_h;
     olui_el *parent, *first, *last, *next;
     olui_cs cs;

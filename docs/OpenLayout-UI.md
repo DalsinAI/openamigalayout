@@ -1,6 +1,6 @@
 # OpenLayout UI
 
-OpenLayout UI (`olui`, version 0.1) lets a program describe its window in
+OpenLayout UI (`olui`, version 0.2) lets a program describe its window in
 HTML and CSS. OpenLayout lays the window out, the OpenGadTools theme draws
 it, and the program's own C functions are called back when something
 happens. It came from the OpenClaude window, which needed a tree that
@@ -63,7 +63,8 @@ fills it.
 | `tabs` | Pages with a row of tab buttons: `OLUI_SELECT` | |
 | `tab` | One page | `title` (its button), `value`, `selected` |
 | `progress` | A bar from 0 to `max` | `max` |
-| `img` | A picture's place: the program draws it | `image` (its number), `width`, `height` |
+| `slider` | A value from `min` to `max`, dragged or keyed: `OLUI_CHANGE` as it moves, the value in the event's `index` | `min`, `max`, `value` |
+| `img` | A picture's place in a line (in a button too): the program draws it | `image` (its number), `width`, `height` |
 
 Every tag takes `id` (how the program finds it and names its handlers),
 `class`, `style`, `disabled` and `hidden`.
@@ -89,8 +90,8 @@ combinators (`toolbar button`, `row > label`) and the states `:hover`,
 | `color`, `background`, `background-color` | `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, a few names; `background` also takes `linear-gradient()` down the box, with up to four stops |
 | `border`, `border-width`, `border-color`, `border-radius` | |
 | `font-size`, `font-weight`, `font-style`, `font-family` (`monospace`), `text-decoration` (`underline`), `text-align`, `line-height` | |
-| `accent-color` | Ticks, radio dots and progress bars |
-| `mark-background`, `mark-border-color` | A checkbox's and radio button's box (ours, not CSS's) |
+| `accent-color` | Ticks, radio dots, progress bars and a slider's filled track |
+| `mark-background`, `mark-border-color` | A checkbox's and radio button's box, a slider's track (ours, not CSS's) |
 | `placeholder-color` | A field's placeholder (ours) |
 
 A list with `height:auto` is as tall as its row, or as what grows gives it,
@@ -111,7 +112,8 @@ The keyboard: Tab and Shift-Tab move between widgets; Return and space
 press a button or a checkbox; in a field the arrows (Shift for the ends),
 Backspace and Del; in a list Up, Down, Shift-Up and Shift-Down for a page,
 Right and Left to open and close a tree's items, Return to activate; in the
-tab buttons Left and Right. A double-click on an item activates it, and the
+tab buttons Left and Right; on a slider Left and Right (Up and Down) a step,
+Shift-Up and Shift-Down a tenth, Shift-Left and Shift-Right the ends. A double-click on an item activates it, and the
 wheel scrolls a list.
 
 ## The calls
@@ -128,7 +130,9 @@ wheel scrolls a list.
 | `olui_mouse`, `olui_key` | Input, for the same |
 | `olui_find(ui, id)` | A widget |
 | `olui_get_text`, `olui_set_text`, `olui_get_value` | |
-| `olui_get_checked`, `olui_set_checked`, `olui_set_disabled`, `olui_set_hidden`, `olui_set_progress`, `olui_focus` | |
+| `olui_get_checked`, `olui_set_checked`, `olui_set_disabled`, `olui_set_hidden`, `olui_set_progress`, `olui_focus` | `olui_set_checked` works on a button too, for `button:checked` (a toolbox's tool in use) |
+| `olui_slider_value`, `olui_set_slider` | A slider's value |
+| `olui_box(ui, el, rect)` | Where a widget is, as last laid out |
 | `olui_list_add(ui, list, parent, text, value)`, `olui_list_clear`, `olui_list_selected`, `olui_list_select`, `olui_item_open` | Lists and trees |
 | `olui_tabs_current`, `olui_tabs_select` | |
 | `olui_theme_css(text, dark, err, len)` | A theme file as CSS |
@@ -138,7 +142,9 @@ The Amiga glue (`include/openlayout_ui_amiga.h`): `olui_amiga_idcmp()`,
 `olui_amiga_layout(a)`, `olui_amiga_event(a, msg)`, `olui_amiga_draw(a)`,
 `olui_amiga_free(a)`; `olui_amiga_own(a, el, fn, data)` for a widget the
 program draws itself (a box the buffer is copied around, up to four), and
-`olui_amiga_fonts(a, font, mono)` for the fonts text is drawn in. It draws into a buffer the size of the window's
+`olui_amiga_fonts(a, font, mono)` for the fonts text is drawn in, and
+`olui_amiga_images(a, fn, data)` for the program's pictures in `img`
+elements, drawn into the window's buffer with the rest. It draws into a buffer the size of the window's
 inside, a simple layer on a bitmap like the window's, and copies it to the
 window in one blit, so nothing flickers.
 
@@ -185,7 +191,7 @@ A program links `libolui.a` and includes `openlayout_ui.h` and
 ## Not yet
 
 - Text selection in a field, the clipboard, and multi-line text editing.
-- Menus, pop-up choosers, sliders and number fields.
-- Pictures: `img` keeps the place, and the program draws there (or draws a box itself with `olui_amiga_own`).
+- Menus, pop-up choosers and number fields.
+- An `img` directly in a `row` or `column` keeps no place: put it in a line (a `div`, a `button`).
 - A resident library: it is a link library for now.
 - Laying out only what changed: each change lays the whole window out.

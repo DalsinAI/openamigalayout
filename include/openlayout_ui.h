@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define OLUI_VERSION "0.1"
+#define OLUI_VERSION "0.2"
 
 typedef struct olui olui;
 typedef struct olui_el olui_el;
@@ -201,6 +201,14 @@ void olui_set_disabled(olui *ui, olui_el *el, int disabled);
 void olui_set_hidden(olui *ui, olui_el *el, int hidden);
 /* A progress bar's value, 0 to its max. */
 void olui_set_progress(olui *ui, olui_el *el, int value);
+/* A slider's value, from its min to its max (attributes min, max and value;
+ * 0 to 100 when not given). It sends OLUI_CHANGE as it moves, with the
+ * value in the event's index (and as text in value); setting it doesn't. */
+int olui_slider_value(const olui_el *el);
+void olui_set_slider(olui *ui, olui_el *el, int value);
+/* Where a widget is, in the window's inner box's pixels, as last laid out.
+ * 0 when it isn't shown or not laid out yet. */
+int olui_box(olui *ui, const olui_el *el, olui_rect *r);
 /* Gives the keyboard to a widget. */
 void olui_focus(olui *ui, olui_el *el);
 

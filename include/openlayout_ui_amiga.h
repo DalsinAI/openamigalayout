@@ -53,6 +53,16 @@ int olui_amiga_theme(olui_amiga *a, const char *path);
 typedef void (*olui_amiga_own_fn)(void *userdata, const olui_el *el, int x, int y, int w, int h);
 int olui_amiga_own(olui_amiga *a, const olui_el *el, olui_amiga_own_fn fn, void *userdata);
 
+/* The pictures of img elements (<img image=N width=.. height=..>, in a
+ * button too, for a toolbox): fn draws picture N into rp, the buffer the
+ * window is drawn in, at x,y and w by h, cut to what olui is drawing. It is
+ * called each time the window is drawn; the pen, draw mode and font are
+ * fn's to set. NULL: img keeps its place empty. */
+struct RastPort;
+typedef void (*olui_amiga_image_fn)(void *userdata, struct RastPort *rp, const olui_el *el, int image, int x, int y,
+                                    int w, int h);
+void olui_amiga_images(olui_amiga *a, olui_amiga_image_fn fn, void *userdata);
+
 /* The fonts text is drawn in (names as diskfont.library takes them, "x.font"):
  * the screen's and topaz.font at first. NULL keeps one. */
 void olui_amiga_fonts(olui_amiga *a, const char *font, const char *mono);
